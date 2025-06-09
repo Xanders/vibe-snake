@@ -18,6 +18,7 @@ Curious about how an AI creates a game? Check out our [detailed blog post](BLOG.
 - Score tracking
 - Pause/Resume game functionality
 - Game Over state with restart option
+- "Vibe Mode" autopilot that plays the snake for you
 
 ## 🛠️ Technologies Used (AI's Preferred Tech Stack)
 
@@ -64,6 +65,7 @@ Curious about how an AI creates a game? Check out our [detailed blog post](BLOG.
 - Eat the red food to grow and score points
 - Avoid hitting the walls or yourself
 - Press Space to pause/resume the game
+- Click the "Vibe Mode" button to let the autopilot take over
 - Use the chat panel on the right to communicate with other players
 
 ## 🐳 Docker Support (Because Even AIs Love Containers)

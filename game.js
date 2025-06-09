@@ -82,6 +82,14 @@ class Game {
         this.chatSend = document.getElementById('chatSend');
         this.chatMessages = document.getElementById('chatMessages');
 
+        // Vibe mode toggle
+        this.autopilot = false;
+        this.vibeButton = document.getElementById('vibeModeToggle');
+        this.vibeButton.addEventListener('click', () => {
+            this.autopilot = !this.autopilot;
+            this.vibeButton.textContent = `Vibe Mode: ${this.autopilot ? 'On' : 'Off'}`;
+        });
+
         // Initialize WebSocket connection
         this.ws = new WebSocket('ws://localhost:3000');
         
@@ -108,6 +116,14 @@ class Game {
 
         if (timestamp - this.lastUpdateTime >= this.updateInterval) {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+            if (this.autopilot) {
+                const dir = this.getAutoDirection();
+                if (dir) {
+                    this.snake.dx = dir.dx;
+                    this.snake.dy = dir.dy;
+                }
+            }
 
             this.snake.update();
             this.checkFoodCollision();
@@ -203,6 +219,79 @@ class Game {
         this.gameOver = false;
         this.isPaused = false;
         requestAnimationFrame(this.gameLoop);
+    }
+
+    bfs(start, goal, obstacles, width, height) {
+        const queue = [start];
+        const visited = new Set([`${start.x},${start.y}`]);
+        const parent = new Map();
+        const obstacleSet = new Set(obstacles.map(o => `${o.x},${o.y}`));
+
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const key = `${current.x},${current.y}`;
+            if (current.x === goal.x && current.y === goal.y) {
+                const path = [];
+                let k = key;
+                while (k !== `${start.x},${start.y}`) {
+                    const [px, py] = k.split(',').map(Number);
+                    path.unshift({ x: px, y: py });
+                    k = parent.get(k);
+                }
+                return path;
+            }
+
+            const neighbors = [
+                { x: current.x + 20, y: current.y },
+                { x: current.x - 20, y: current.y },
+                { x: current.x, y: current.y + 20 },
+                { x: current.x, y: current.y - 20 }
+            ];
+            for (const n of neighbors) {
+                const nKey = `${n.x},${n.y}`;
+                if (n.x < 0 || n.x >= width || n.y < 0 || n.y >= height) continue;
+                if (obstacleSet.has(nKey) || visited.has(nKey)) continue;
+                visited.add(nKey);
+                parent.set(nKey, key);
+                queue.push(n);
+            }
+        }
+        return null;
+    }
+
+    getAutoDirection() {
+        const obstacles = this.snake.tail.slice(0, this.snake.tail.length - 1);
+        const path = this.bfs(
+            { x: this.snake.x, y: this.snake.y },
+            { x: this.food.x, y: this.food.y },
+            obstacles,
+            this.canvas.width,
+            this.canvas.height
+        );
+
+        if (path && path.length) {
+            const next = path[0];
+            return { dx: next.x - this.snake.x, dy: next.y - this.snake.y };
+        }
+
+        const moves = [
+            { dx: 20, dy: 0 },
+            { dx: -20, dy: 0 },
+            { dx: 0, dy: 20 },
+            { dx: 0, dy: -20 }
+        ];
+        for (const m of moves) {
+            const nx = this.snake.x + m.dx;
+            const ny = this.snake.y + m.dy;
+            const collision =
+                nx < 0 ||
+                nx >= this.canvas.width ||
+                ny < 0 ||
+                ny >= this.canvas.height ||
+                this.snake.tail.some(seg => seg.x === nx && seg.y === ny);
+            if (!collision) return m;
+        }
+        return null;
     }
 
     sendMessage() {
