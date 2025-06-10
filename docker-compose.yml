@@ -4,7 +4,7 @@ services:
   backend:
     build: .
     ports:
-      - "3000:3000"
+      - "12345:12345"
     volumes:
       - ./src:/app/src
 
@@ -13,7 +13,7 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./index.html:/usr/share/nginx/html/index.html
-      - ./game.js:/usr/share/nginx/html/game.js
+      - ./public/index.html:/usr/share/nginx/html/index.html
+      - ./public/game.js:/usr/share/nginx/html/game.js
     depends_on:
       - backend

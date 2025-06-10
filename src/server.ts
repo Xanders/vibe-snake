@@ -9,7 +9,8 @@ interface AIResponses {
     [key: string]: AICategory;
 }
 
-const server = new WebSocket.Server({ port: 3000 });
+const PORT = 12345;
+const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
 
 // Simple AI responses for different message patterns
@@ -80,4 +81,4 @@ server.on('connection', (ws: WebSocket) => {
     });
 });
 
-console.log('WebSocket server is running on port 3000');
+console.log(`WebSocket server is running on port ${PORT}`);
