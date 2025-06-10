@@ -42,7 +42,7 @@ For example, when we faced a WebSocket connection issue:
 
 ```bash
 Error: WebSocket connection failed
-At: ws://localhost:12345
+At: ws://localhost:49123
 Reason: ECONNREFUSED
 ```
 

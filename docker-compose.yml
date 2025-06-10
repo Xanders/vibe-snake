@@ -4,7 +4,7 @@ services:
   backend:
     build: .
     ports:
-      - "12345:12345"
+      - "49123:49123"
     volumes:
       - ./src:/app/src
 

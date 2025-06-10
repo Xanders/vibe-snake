@@ -92,7 +92,8 @@ class Game {
 
         // Initialize WebSocket connection
         const host = window.location.hostname;
-        this.ws = new WebSocket(`ws://${host}:12345`);
+        const protocol = (host === 'localhost' || host === '127.0.0.1' || host === '::1') ? 'ws' : 'wss';
+        this.ws = new WebSocket(`${protocol}://${host}:49123`);
         
         // Handle incoming messages from WebSocket
         this.ws.onmessage = (event) => {
