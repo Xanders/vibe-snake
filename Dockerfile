@@ -10,6 +10,6 @@ RUN npm install
 RUN npm install typescript -g
 RUN tsc
 
-EXPOSE 12345
+EXPOSE 49123
 
 CMD ["node", "dist/server.js"]

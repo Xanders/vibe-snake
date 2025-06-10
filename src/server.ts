@@ -9,7 +9,7 @@ interface AIResponses {
     [key: string]: AICategory;
 }
 
-const PORT = 12345;
+const PORT = 49123;
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
 
