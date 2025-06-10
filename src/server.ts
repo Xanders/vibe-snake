@@ -61,7 +61,7 @@ function broadcast(message: string): void {
 server.on('connection', (ws: WebSocket) => {
     clients.add(ws);
     console.log('New client connected');
-    broadcast('🤖 AI: Welcome to Snake Game! Feel free to ask for help or tips!');
+    ws.send('🤖 AI: Welcome to Snake Game! Feel free to ask for help or tips!');
 
     ws.on('message', (message: WebSocket.RawData) => {
         const messageStr = message.toString();
