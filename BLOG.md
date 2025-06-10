@@ -63,7 +63,7 @@ $ tsc --init
 $ npm install ws @types/ws
 
 # Start development server
-$ npm run dev
+$ npm start
 ```
 
 ## 💡 Key Learning Points
