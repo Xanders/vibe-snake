@@ -55,6 +55,15 @@ class Food {
         this.y = Math.floor(Math.random() * 20) * 20;
     }
 
+    moveBy(dx, dy, width, height) {
+        const nx = this.x + dx;
+        const ny = this.y + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            this.x = nx;
+            this.y = ny;
+        }
+    }
+
     draw(ctx) {
         ctx.fillStyle = '#FF5252';
         ctx.fillRect(this.x, this.y, 18, 18);
@@ -86,10 +95,23 @@ class Game {
         // Vibe mode toggle
         this.autopilot = false;
         this.vibeButton = document.getElementById('vibeModeToggle');
+        this.berryMode = false;
+        this.berryButton = document.getElementById('berryModeToggle');
         this.vibeButton.addEventListener('click', () => {
             this.autopilot = !this.autopilot;
             console.log('Vibe mode toggled:', this.autopilot);
             this.vibeButton.textContent = `Vibe Mode: ${this.autopilot ? 'On' : 'Off'}`;
+            if (this.autopilot) {
+                this.berryButton.style.display = 'inline-block';
+            } else {
+                this.berryButton.style.display = 'none';
+                this.berryMode = false;
+                this.berryButton.textContent = 'Berry Mode: Off';
+            }
+        });
+        this.berryButton.addEventListener('click', () => {
+            this.berryMode = !this.berryMode;
+            this.berryButton.textContent = `Berry Mode: ${this.berryMode ? 'On' : 'Off'}`;
         });
 
         // Initialize WebSocket connection
@@ -123,6 +145,7 @@ class Game {
 
     gameLoop(timestamp) {
         if (this.isPaused || this.gameOver) return;
+
 
         if (timestamp - this.lastUpdateTime >= this.updateInterval) {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -167,6 +190,24 @@ class Game {
         }
 
         if (this.isPaused || this.gameOver) return;
+
+        if (this.autopilot && this.berryMode) {
+            switch (event.key) {
+                case 'ArrowUp':
+                    this.food.moveBy(0, -20, this.canvas.width, this.canvas.height);
+                    break;
+                case 'ArrowDown':
+                    this.food.moveBy(0, 20, this.canvas.width, this.canvas.height);
+                    break;
+                case 'ArrowLeft':
+                    this.food.moveBy(-20, 0, this.canvas.width, this.canvas.height);
+                    break;
+                case 'ArrowRight':
+                    this.food.moveBy(20, 0, this.canvas.width, this.canvas.height);
+                    break;
+            }
+            return;
+        }
 
         switch (event.key) {
             case 'ArrowUp':
