@@ -51,7 +51,7 @@ Curious about how an AI creates a game? Check out our [detailed blog post](BLOG.
    ```
    This will:
    - Build the TypeScript code
-   - Start the WebSocket server on port 3000
+   - Start the WebSocket server on port 12345
    - Start the static file server on port 8080
 
 4. Open your browser and navigate to:
