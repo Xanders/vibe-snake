@@ -63,6 +63,7 @@ class Food {
 
 class Game {
     constructor() {
+        console.log('Initializing game...');
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.snake = new Snake();
@@ -87,16 +88,23 @@ class Game {
         this.vibeButton = document.getElementById('vibeModeToggle');
         this.vibeButton.addEventListener('click', () => {
             this.autopilot = !this.autopilot;
+            console.log('Vibe mode toggled:', this.autopilot);
             this.vibeButton.textContent = `Vibe Mode: ${this.autopilot ? 'On' : 'Off'}`;
         });
 
         // Initialize WebSocket connection
         const host = window.location.hostname;
-        const protocol = (host === 'localhost' || host === '127.0.0.1' || host === '::1') ? 'ws' : 'wss';
-        this.ws = new WebSocket(`${protocol}://${host}:49123`);
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const url = `${protocol}://${host}:49123`;
+        console.log('Connecting to WebSocket:', url);
+        this.ws = new WebSocket(url);
+        this.ws.onopen = () => console.log('WebSocket connection opened');
+        this.ws.onerror = (err) => console.error('WebSocket error:', err);
+        this.ws.onclose = () => console.log('WebSocket connection closed');
         
         // Handle incoming messages from WebSocket
         this.ws.onmessage = (event) => {
+            console.log('Received message:', event.data);
             const messageElement = document.createElement('div');
             messageElement.className = 'message';
             messageElement.textContent = event.data;
@@ -198,6 +206,7 @@ class Game {
     }
 
     drawGameOver() {
+        console.log('Game over');
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -214,6 +223,7 @@ class Game {
     }
 
     reset() {
+        console.log('Resetting game');
         this.snake.reset();
         this.food.move();
         this.score = 0;
@@ -299,6 +309,7 @@ class Game {
     sendMessage() {
         const message = this.chatInput.value.trim();
         if (message && this.ws.readyState === WebSocket.OPEN) {
+            console.log('Sending message:', message);
             this.ws.send(message);
             this.chatInput.value = '';
         }
