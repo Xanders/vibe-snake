@@ -145,11 +145,16 @@ class Game {
         let touchStartX = 0;
         let touchStartY = 0;
         this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
             const t = e.touches[0];
             touchStartX = t.clientX;
             touchStartY = t.clientY;
-        });
+        }, { passive: false });
+        this.canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+        }, { passive: false });
         this.canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
             const t = e.changedTouches[0];
             const dx = t.clientX - touchStartX;
             const dy = t.clientY - touchStartY;
@@ -160,7 +165,7 @@ class Game {
                 if (dy > 0) this.processDirection('ArrowDown');
                 else this.processDirection('ArrowUp');
             }
-        });
+        }, { passive: false });
 
         // Restart on tap when game over
         this.canvas.addEventListener('click', () => {
@@ -171,7 +176,7 @@ class Game {
                 e.preventDefault();
                 this.reset();
             }
-        });
+        }, { passive: false });
     }
 
     gameLoop(timestamp) {
