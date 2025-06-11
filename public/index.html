@@ -37,6 +37,70 @@
             margin: 5px 0;
             color: #666;
         }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #4CAF50;
+        }
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+        @media (max-width: 600px) {
+            body {
+                height: auto;
+            }
+            .game-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            canvas {
+                width: 100%;
+                max-width: 400px;
+                height: 400px;
+            }
+            .chat-container {
+                width: 90vw;
+                height: 300px;
+            }
+        }
         .chat-container {
             width: 300px;
             height: 400px;
@@ -97,10 +161,22 @@
         </div>
     </div>
     <div class="controls">
-        <p>Use arrow keys to control the snake</p>
-        <p>Press Space to pause/resume</p>
-        <button id="vibeModeToggle">Vibe Mode: Off</button>
-        <button id="berryModeToggle" style="display:none;">Berry Mode: Off</button>
+        <p>Use arrow keys or swipe to control the snake</p>
+        <p>Press Space or tap the field to restart</p>
+        <div class="toggle-container">
+            <span>Vibe Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="vibeModeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="toggle-container" id="berryToggleContainer" style="display:none;">
+            <span>Berry Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="berryModeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
     </div>
     <script src="game.js"></script>
 </body>
