@@ -94,24 +94,23 @@ class Game {
 
         // Vibe mode toggle
         this.autopilot = false;
-        this.vibeButton = document.getElementById('vibeModeToggle');
+        this.vibeToggle = document.getElementById('vibeModeToggle');
         this.berryMode = false;
-        this.berryButton = document.getElementById('berryModeToggle');
-        this.vibeButton.addEventListener('click', () => {
-            this.autopilot = !this.autopilot;
+        this.berryToggle = document.getElementById('berryModeToggle');
+        this.berryContainer = document.getElementById('berryToggleContainer');
+        this.vibeToggle.addEventListener('change', () => {
+            this.autopilot = this.vibeToggle.checked;
             console.log('Vibe mode toggled:', this.autopilot);
-            this.vibeButton.textContent = `Vibe Mode: ${this.autopilot ? 'On' : 'Off'}`;
             if (this.autopilot) {
-                this.berryButton.style.display = 'inline-block';
+                this.berryContainer.style.display = 'flex';
             } else {
-                this.berryButton.style.display = 'none';
+                this.berryContainer.style.display = 'none';
+                this.berryToggle.checked = false;
                 this.berryMode = false;
-                this.berryButton.textContent = 'Berry Mode: Off';
             }
         });
-        this.berryButton.addEventListener('click', () => {
-            this.berryMode = !this.berryMode;
-            this.berryButton.textContent = `Berry Mode: ${this.berryMode ? 'On' : 'Off'}`;
+        this.berryToggle.addEventListener('change', () => {
+            this.berryMode = this.berryToggle.checked;
         });
 
         // Initialize WebSocket connection
@@ -139,6 +138,38 @@ class Game {
         this.chatInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 this.sendMessage();
+            }
+        });
+
+        // Touch controls for mobile
+        let touchStartX = 0;
+        let touchStartY = 0;
+        this.canvas.addEventListener('touchstart', (e) => {
+            const t = e.touches[0];
+            touchStartX = t.clientX;
+            touchStartY = t.clientY;
+        });
+        this.canvas.addEventListener('touchend', (e) => {
+            const t = e.changedTouches[0];
+            const dx = t.clientX - touchStartX;
+            const dy = t.clientY - touchStartY;
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (dx > 0) this.processDirection('ArrowRight');
+                else this.processDirection('ArrowLeft');
+            } else {
+                if (dy > 0) this.processDirection('ArrowDown');
+                else this.processDirection('ArrowUp');
+            }
+        });
+
+        // Restart on tap when game over
+        this.canvas.addEventListener('click', () => {
+            if (this.gameOver) this.reset();
+        });
+        this.canvas.addEventListener('touchstart', (e) => {
+            if (this.gameOver) {
+                e.preventDefault();
+                this.reset();
             }
         });
     }
@@ -190,9 +221,13 @@ class Game {
         }
 
         if (this.isPaused || this.gameOver) return;
+        if (this.isPaused || this.gameOver) return;
+        this.processDirection(event.key);
+    }
 
+    processDirection(key) {
         if (this.autopilot && this.berryMode) {
-            switch (event.key) {
+            switch (key) {
                 case 'ArrowUp':
                     this.food.moveBy(0, -20, this.canvas.width, this.canvas.height);
                     break;
@@ -209,7 +244,7 @@ class Game {
             return;
         }
 
-        switch (event.key) {
+        switch (key) {
             case 'ArrowUp':
                 if (this.snake.dy === 0) {
                     this.snake.dx = 0;
@@ -257,7 +292,7 @@ class Game {
         this.ctx.fillText('Game Over!', this.canvas.width / 2, this.canvas.height / 2);
 
         this.ctx.font = '24px Arial';
-        this.ctx.fillText('Press Space to restart', this.canvas.width / 2, this.canvas.height / 2 + 40);
+        this.ctx.fillText('Tap or press Space to restart', this.canvas.width / 2, this.canvas.height / 2 + 40);
 
         // Remove the old event listener setup and use the existing handleKeyPress method
         // which already handles the Space key press for both pause and restart
