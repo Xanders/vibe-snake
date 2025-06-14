@@ -91,6 +91,8 @@ class Game {
         this.chatInput = document.getElementById('chatInput');
         this.chatSend = document.getElementById('chatSend');
         this.chatMessages = document.getElementById('chatMessages');
+        this.leaderboardElement = document.getElementById('leaderboard');
+        this.leaderboard = [];
 
         // Vibe mode toggle
         this.autopilot = false;
@@ -126,6 +128,16 @@ class Game {
         // Handle incoming messages from WebSocket
         this.ws.onmessage = (event) => {
             console.log('Received message:', event.data);
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'leaderboard') {
+                    this.leaderboard = data.leaderboard;
+                    this.renderLeaderboard();
+                    return;
+                }
+            } catch (e) {
+                // not JSON
+            }
             const messageElement = document.createElement('div');
             messageElement.className = 'message';
             messageElement.textContent = event.data;
@@ -301,6 +313,8 @@ class Game {
 
         // Remove the old event listener setup and use the existing handleKeyPress method
         // which already handles the Space key press for both pause and restart
+
+        this.submitScoreIfEligible();
     }
 
     reset() {
@@ -385,6 +399,28 @@ class Game {
             if (!collision) return m;
         }
         return null;
+    }
+
+    renderLeaderboard() {
+        if (!this.leaderboardElement) return;
+        this.leaderboardElement.innerHTML = this.leaderboard
+            .map((e, i) => `${i + 1}. ${e.name} - ${e.score}`)
+            .map(text => `<li>${text}</li>`)
+            .join('');
+    }
+
+    submitScoreIfEligible() {
+        if (!this.berryMode) return;
+        const worst = this.leaderboard.length < 20 ? Infinity : this.leaderboard[this.leaderboard.length - 1].score;
+        if (this.score <= worst) {
+            const name = prompt('Enter your name for the leaderboard:');
+            if (name) {
+                const payload = { type: 'submit-score', name, score: this.score };
+                if (this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(payload));
+                }
+            }
+        }
     }
 
     sendMessage() {

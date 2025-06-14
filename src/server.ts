@@ -13,6 +13,13 @@ const PORT = 49123;
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
 
+interface ScoreEntry {
+    name: string;
+    score: number;
+}
+
+const leaderboard: ScoreEntry[] = [];
+
 // Simple AI responses for different message patterns
 const aiResponses: AIResponses = {
     greetings: {
@@ -59,19 +66,49 @@ function broadcast(message: string): void {
     });
 }
 
+function sendLeaderboard(ws?: WebSocket): void {
+    const payload = JSON.stringify({ type: 'leaderboard', leaderboard });
+    if (ws) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+        }
+    } else {
+        broadcast(payload);
+    }
+}
+
+function updateLeaderboard(name: string, score: number): void {
+    leaderboard.push({ name, score });
+    leaderboard.sort((a, b) => a.score - b.score);
+    if (leaderboard.length > 20) {
+        leaderboard.length = 20;
+    }
+}
+
 server.on('connection', (ws: WebSocket) => {
     clients.add(ws);
     console.log('New client connected');
     ws.send('🤖 AI: Welcome to Snake Game! Feel free to ask for help or tips!');
+    sendLeaderboard(ws);
 
     ws.on('message', (message: WebSocket.RawData) => {
         const messageStr = message.toString();
+        try {
+            const data = JSON.parse(messageStr);
+            if (data.type === 'submit-score' && typeof data.name === 'string' && typeof data.score === 'number') {
+                updateLeaderboard(data.name, data.score);
+                sendLeaderboard();
+                return;
+            }
+        } catch (err) {
+            // Not JSON, treat as chat message
+        }
+
         broadcast(`Player: ${messageStr}`);
 
-        // Generate AI response
         const aiResponse = getAIResponse(messageStr);
         if (aiResponse) {
-            setTimeout(() => broadcast(aiResponse), 1000); // Add a small delay for more natural feeling
+            setTimeout(() => broadcast(aiResponse), 1000);
         }
     });
 
