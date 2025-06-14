@@ -145,6 +145,14 @@
         .chat-send:hover {
             background-color: #45a049;
         }
+        .leaderboard-container {
+            margin-top: 20px;
+            width: 100%;
+            max-width: 400px;
+        }
+        #leaderboard {
+            padding-left: 20px;
+        }
     </style>
 </head>
 <body>
@@ -178,6 +186,10 @@
                 <span class="slider"></span>
             </label>
         </div>
+    </div>
+    <div id="leaderboardContainer" class="leaderboard-container">
+        <h3>Berry Mode Leaderboard</h3>
+        <ol id="leaderboard"></ol>
     </div>
     <script src="game.js"></script>
 </body>
