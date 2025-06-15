@@ -26,6 +26,7 @@ interface MultiplayerPlayer {
     x: number;
     y: number;
     emoji: string;
+    name: string;
 }
 
 interface SnakeState {
@@ -68,6 +69,7 @@ function broadcastMultiplayerState(): void {
             x: p.x,
             y: p.y,
             emoji: p.emoji,
+            name: p.name,
         })),
     };
     broadcast(JSON.stringify(state));
@@ -202,7 +204,7 @@ server.on('connection', (ws: WebSocket) => {
                 sendLeaderboard();
                 return;
             }
-            if (data.type === 'join-multiplayer') {
+            if (data.type === 'join-multiplayer' && typeof data.name === 'string') {
                 if (!multiplayerPlayers.has(ws)) {
                     const id = Math.random().toString(36).slice(2, 8);
                     const emoji = emojis[Math.floor(Math.random() * emojis.length)];
@@ -212,9 +214,10 @@ server.on('connection', (ws: WebSocket) => {
                         x: Math.floor(Math.random() * 20) * 20,
                         y: Math.floor(Math.random() * 20) * 20,
                         emoji,
+                        name: data.name,
                     };
                     multiplayerPlayers.set(ws, player);
-                    ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji }));
+                    ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji, name: data.name }));
                     broadcastMultiplayerState();
                 }
                 return;

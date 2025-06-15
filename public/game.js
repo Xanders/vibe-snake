@@ -96,6 +96,8 @@ class Game {
         this.remoteSnake = null;
         this.remotePlayers = [];
         this.playerId = null;
+        this.onlinePlayersList = document.getElementById('onlinePlayersList');
+        this.onlinePlayersContainer = document.getElementById('onlinePlayersContainer');
         this.renderLeaderboard();
 
         // Vibe mode toggle
@@ -163,6 +165,7 @@ class Game {
                 if (data.type === 'multiplayer-state') {
                     this.remoteSnake = data.snake;
                     this.remotePlayers = data.players;
+                    this.renderOnlinePlayers();
                     return;
                 }
             } catch (e) {
@@ -483,8 +486,16 @@ class Game {
             .join('');
     }
 
+    renderOnlinePlayers() {
+        if (!this.onlinePlayersList) return;
+        this.onlinePlayersList.innerHTML = this.remotePlayers
+            .map(p => `<li>${p.emoji} ${p.name || ''}</li>`)
+            .join('');
+    }
+
     enterMultiplayer() {
         document.getElementById('leaderboardContainer').style.display = 'none';
+        this.onlinePlayersContainer.style.display = 'block';
         this.vibeToggle.disabled = true;
         this.berryToggle.disabled = true;
         this.vibeToggle.checked = false;
@@ -494,12 +505,20 @@ class Game {
         this.snake.reset();
         this.food.move();
         if (this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ type: 'join-multiplayer' }));
+            const name = prompt('Enter your name:');
+            if (name) {
+                this.ws.send(JSON.stringify({ type: 'join-multiplayer', name }));
+            } else {
+                this.multiToggle.checked = false;
+                this.onlinePlayersContainer.style.display = 'none';
+                return;
+            }
         }
     }
 
     exitMultiplayer() {
         document.getElementById('leaderboardContainer').style.display = '';
+        this.onlinePlayersContainer.style.display = 'none';
         this.vibeToggle.disabled = false;
         this.berryToggle.disabled = false;
         this.multiToggle.checked = false;
@@ -512,6 +531,7 @@ class Game {
         }
         this.remoteSnake = null;
         this.remotePlayers = [];
+        this.renderOnlinePlayers();
         this.playerId = null;
         this.reset();
     }
