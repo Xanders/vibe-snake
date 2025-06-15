@@ -96,6 +96,7 @@ class Game {
         this.remoteSnake = null;
         this.remotePlayers = [];
         this.playerId = null;
+        this.renderLeaderboard();
 
         // Vibe mode toggle
         this.autopilot = false;
@@ -478,8 +479,7 @@ class Game {
     renderLeaderboard() {
         if (!this.leaderboardElement) return;
         this.leaderboardElement.innerHTML = this.leaderboard
-            .map((e, i) => `${i + 1}. ${e.name} - ${e.score}`)
-            .map(text => `<li>${text}</li>`)
+            .map(e => `<li>${e.name} - ${e.score}</li>`)
             .join('');
     }
 
