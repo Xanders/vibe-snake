@@ -20,6 +20,108 @@ interface ScoreEntry {
 
 const leaderboard: ScoreEntry[] = [];
 
+interface MultiplayerPlayer {
+    id: string;
+    ws: WebSocket;
+    x: number;
+    y: number;
+    emoji: string;
+}
+
+interface SnakeState {
+    x: number;
+    y: number;
+    dx: number;
+    dy: number;
+    tail: { x: number; y: number }[];
+    length: number;
+}
+
+const multiplayerPlayers = new Map<WebSocket, MultiplayerPlayer>();
+const emojis = ['🍓', '🍒', '🍇', '🍉', '🍍', '🍎', '🍑', '🥕'];
+
+const snake: SnakeState = {
+    x: 200,
+    y: 200,
+    dx: 20,
+    dy: 0,
+    tail: [],
+    length: 5,
+};
+
+function resetSnake(): void {
+    snake.x = 200;
+    snake.y = 200;
+    snake.dx = 20;
+    snake.dy = 0;
+    snake.tail = [];
+    snake.length = 5;
+}
+
+function broadcastMultiplayerState(): void {
+    if (multiplayerPlayers.size === 0) return;
+    const state = {
+        type: 'multiplayer-state',
+        snake: { x: snake.x, y: snake.y, tail: snake.tail },
+        players: Array.from(multiplayerPlayers.values()).map(p => ({
+            id: p.id,
+            x: p.x,
+            y: p.y,
+            emoji: p.emoji,
+        })),
+    };
+    broadcast(JSON.stringify(state));
+}
+
+function gameStep(): void {
+    if (multiplayerPlayers.size === 0) return;
+
+    // Follow the first player if available
+    const players = Array.from(multiplayerPlayers.values());
+    const target = players[0];
+    if (target) {
+        if (target.x > snake.x) {
+            snake.dx = 20; snake.dy = 0;
+        } else if (target.x < snake.x) {
+            snake.dx = -20; snake.dy = 0;
+        } else if (target.y > snake.y) {
+            snake.dx = 0; snake.dy = 20;
+        } else if (target.y < snake.y) {
+            snake.dx = 0; snake.dy = -20;
+        }
+    }
+
+    snake.tail.unshift({ x: snake.x, y: snake.y });
+    while (snake.tail.length > snake.length) {
+        snake.tail.pop();
+    }
+    snake.x += snake.dx;
+    snake.y += snake.dy;
+
+    // Wall collision
+    if (snake.x < 0 || snake.x >= 400 || snake.y < 0 || snake.y >= 400) {
+        resetSnake();
+    }
+
+    // Self collision
+    if (snake.tail.some(seg => seg.x === snake.x && seg.y === snake.y)) {
+        resetSnake();
+    }
+
+    // Player collision
+    for (const player of players) {
+        if (player.x === snake.x && player.y === snake.y) {
+            player.x = Math.floor(Math.random() * 20) * 20;
+            player.y = Math.floor(Math.random() * 20) * 20;
+            snake.length++;
+        }
+    }
+
+    broadcastMultiplayerState();
+}
+
+setInterval(gameStep, 150);
+
 // Simple AI responses for different message patterns
 const aiResponses: AIResponses = {
     greetings: {
@@ -100,6 +202,47 @@ server.on('connection', (ws: WebSocket) => {
                 sendLeaderboard();
                 return;
             }
+            if (data.type === 'join-multiplayer') {
+                if (!multiplayerPlayers.has(ws)) {
+                    const id = Math.random().toString(36).slice(2, 8);
+                    const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+                    const player: MultiplayerPlayer = {
+                        id,
+                        ws,
+                        x: Math.floor(Math.random() * 20) * 20,
+                        y: Math.floor(Math.random() * 20) * 20,
+                        emoji,
+                    };
+                    multiplayerPlayers.set(ws, player);
+                    ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji }));
+                    broadcastMultiplayerState();
+                }
+                return;
+            }
+            if (data.type === 'move' && multiplayerPlayers.has(ws) && typeof data.dir === 'string') {
+                const player = multiplayerPlayers.get(ws)!;
+                switch (data.dir) {
+                    case 'up':
+                        if (player.y > 0) player.y -= 20;
+                        break;
+                    case 'down':
+                        if (player.y < 380) player.y += 20;
+                        break;
+                    case 'left':
+                        if (player.x > 0) player.x -= 20;
+                        break;
+                    case 'right':
+                        if (player.x < 380) player.x += 20;
+                        break;
+                }
+                broadcastMultiplayerState();
+                return;
+            }
+            if (data.type === 'leave-multiplayer') {
+                multiplayerPlayers.delete(ws);
+                broadcastMultiplayerState();
+                return;
+            }
         } catch (err) {
             // Not JSON, treat as chat message
         }
@@ -114,6 +257,7 @@ server.on('connection', (ws: WebSocket) => {
 
     ws.on('close', () => {
         clients.delete(ws);
+        multiplayerPlayers.delete(ws);
         console.log('Client disconnected');
     });
 });

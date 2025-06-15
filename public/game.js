@@ -93,6 +93,9 @@ class Game {
         this.chatMessages = document.getElementById('chatMessages');
         this.leaderboardElement = document.getElementById('leaderboard');
         this.leaderboard = [];
+        this.remoteSnake = null;
+        this.remotePlayers = [];
+        this.playerId = null;
 
         // Vibe mode toggle
         this.autopilot = false;
@@ -100,19 +103,36 @@ class Game {
         this.berryMode = false;
         this.berryToggle = document.getElementById('berryModeToggle');
         this.berryContainer = document.getElementById('berryToggleContainer');
+        this.multiplayerMode = false;
+        this.multiToggle = document.getElementById('multiplayerModeToggle');
+        this.multiContainer = document.getElementById('multiToggleContainer');
         this.vibeToggle.addEventListener('change', () => {
             this.autopilot = this.vibeToggle.checked;
             console.log('Vibe mode toggled:', this.autopilot);
             if (this.autopilot) {
                 this.berryContainer.style.display = 'flex';
+                this.multiContainer.style.display = 'flex';
             } else {
                 this.berryContainer.style.display = 'none';
+                this.multiContainer.style.display = 'none';
                 this.berryToggle.checked = false;
                 this.berryMode = false;
+                if (this.multiplayerMode) {
+                    this.multiToggle.checked = false;
+                    this.exitMultiplayer();
+                }
             }
         });
         this.berryToggle.addEventListener('change', () => {
             this.berryMode = this.berryToggle.checked;
+        });
+        this.multiToggle.addEventListener('change', () => {
+            this.multiplayerMode = this.multiToggle.checked;
+            if (this.multiplayerMode) {
+                this.enterMultiplayer();
+            } else {
+                this.exitMultiplayer();
+            }
         });
 
         // Initialize WebSocket connection
@@ -133,6 +153,15 @@ class Game {
                 if (data.type === 'leaderboard') {
                     this.leaderboard = data.leaderboard;
                     this.renderLeaderboard();
+                    return;
+                }
+                if (data.type === 'init-multiplayer') {
+                    this.playerId = data.id;
+                    return;
+                }
+                if (data.type === 'multiplayer-state') {
+                    this.remoteSnake = data.snake;
+                    this.remotePlayers = data.players;
                     return;
                 }
             } catch (e) {
@@ -194,6 +223,25 @@ class Game {
     gameLoop(timestamp) {
         if (this.isPaused || this.gameOver) return;
 
+        if (this.multiplayerMode) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            if (this.remoteSnake) {
+                // draw snake
+                this.ctx.fillStyle = '#4CAF50';
+                this.ctx.fillRect(this.remoteSnake.x, this.remoteSnake.y, 18, 18);
+                this.remoteSnake.tail.forEach(t => {
+                    this.ctx.fillRect(t.x, t.y, 18, 18);
+                });
+            }
+            this.remotePlayers.forEach(p => {
+                this.ctx.font = '20px Arial';
+                this.ctx.fillText(p.emoji, p.x + 2, p.y + 18);
+            });
+            this.lastUpdateTime = timestamp;
+            requestAnimationFrame(this.gameLoop);
+            return;
+        }
+
 
         if (timestamp - this.lastUpdateTime >= this.updateInterval) {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -238,11 +286,37 @@ class Game {
         }
 
         if (this.isPaused || this.gameOver) return;
+        if (this.multiplayerMode) {
+            const dirMap = {
+                ArrowUp: 'up',
+                ArrowDown: 'down',
+                ArrowLeft: 'left',
+                ArrowRight: 'right'
+            };
+            const d = dirMap[event.key];
+            if (d && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ type: 'move', dir: d }));
+            }
+            return;
+        }
         if (this.isPaused || this.gameOver) return;
         this.processDirection(event.key);
     }
 
     processDirection(key) {
+        if (this.multiplayerMode) {
+            const map = {
+                ArrowUp: 'up',
+                ArrowDown: 'down',
+                ArrowLeft: 'left',
+                ArrowRight: 'right'
+            };
+            const d = map[key];
+            if (d && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ type: 'move', dir: d }));
+            }
+            return;
+        }
         if (this.autopilot && this.berryMode) {
             switch (key) {
                 case 'ArrowUp':
@@ -407,6 +481,39 @@ class Game {
             .map((e, i) => `${i + 1}. ${e.name} - ${e.score}`)
             .map(text => `<li>${text}</li>`)
             .join('');
+    }
+
+    enterMultiplayer() {
+        document.getElementById('leaderboardContainer').style.display = 'none';
+        this.vibeToggle.disabled = true;
+        this.berryToggle.disabled = true;
+        this.vibeToggle.checked = false;
+        this.autopilot = false;
+        this.berryToggle.checked = false;
+        this.berryMode = false;
+        this.snake.reset();
+        this.food.move();
+        if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'join-multiplayer' }));
+        }
+    }
+
+    exitMultiplayer() {
+        document.getElementById('leaderboardContainer').style.display = '';
+        this.vibeToggle.disabled = false;
+        this.berryToggle.disabled = false;
+        this.multiToggle.checked = false;
+        this.vibeToggle.checked = false;
+        this.autopilot = false;
+        this.berryToggle.checked = false;
+        this.berryMode = false;
+        if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'leave-multiplayer' }));
+        }
+        this.remoteSnake = null;
+        this.remotePlayers = [];
+        this.playerId = null;
+        this.reset();
     }
 
     submitScoreIfEligible() {
