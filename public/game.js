@@ -93,6 +93,7 @@ class Game {
         this.chatMessages = document.getElementById('chatMessages');
         this.leaderboardElement = document.getElementById('leaderboard');
         this.leaderboard = [];
+        this.renderLeaderboard();
 
         // Vibe mode toggle
         this.autopilot = false;
@@ -404,8 +405,7 @@ class Game {
     renderLeaderboard() {
         if (!this.leaderboardElement) return;
         this.leaderboardElement.innerHTML = this.leaderboard
-            .map((e, i) => `${i + 1}. ${e.name} - ${e.score}`)
-            .map(text => `<li>${text}</li>`)
+            .map(e => `<li>${e.name} - ${e.score}</li>`)
             .join('');
     }
 
