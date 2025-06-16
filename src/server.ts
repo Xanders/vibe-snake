@@ -57,13 +57,16 @@ function resetSnake(): void {
     snake.dy = 0;
     snake.tail = [];
     snake.length = 5;
+    score = 0;
 }
+
+let score = 0;
 
 function broadcastMultiplayerState(): void {
     if (multiplayerPlayers.size === 0) return;
     const state = {
         type: 'multiplayer-state',
-        snake: { x: snake.x, y: snake.y, tail: snake.tail },
+        snake: { x: snake.x, y: snake.y, tail: snake.tail, length: snake.length },
         players: Array.from(multiplayerPlayers.values()).map(p => ({
             id: p.id,
             x: p.x,
@@ -71,25 +74,104 @@ function broadcastMultiplayerState(): void {
             emoji: p.emoji,
             name: p.name,
         })),
+        score,
     };
     broadcast(JSON.stringify(state));
 }
 
+interface Point { x: number; y: number; }
+
+function bfs(start: Point, goal: Point, obstacles: Point[], width: number, height: number): Point[] | null {
+    const queue: Point[] = [start];
+    const visited = new Set<string>([`${start.x},${start.y}`]);
+    const parent = new Map<string, string>();
+    const obstacleSet = new Set<string>(obstacles.map(o => `${o.x},${o.y}`));
+
+    while (queue.length > 0) {
+        const current = queue.shift()!;
+        const key = `${current.x},${current.y}`;
+        if (current.x === goal.x && current.y === goal.y) {
+            const path: Point[] = [];
+            let k = key;
+            while (k !== `${start.x},${start.y}`) {
+                const [px, py] = k.split(',').map(Number);
+                path.unshift({ x: px, y: py });
+                k = parent.get(k)!;
+            }
+            return path;
+        }
+
+        const neighbors = [
+            { x: current.x + 20, y: current.y },
+            { x: current.x - 20, y: current.y },
+            { x: current.x, y: current.y + 20 },
+            { x: current.x, y: current.y - 20 },
+        ];
+
+        for (const n of neighbors) {
+            const nKey = `${n.x},${n.y}`;
+            if (n.x < 0 || n.x >= width || n.y < 0 || n.y >= height) continue;
+            if (obstacleSet.has(nKey) || visited.has(nKey)) continue;
+            visited.add(nKey);
+            parent.set(nKey, key);
+            queue.push(n);
+        }
+    }
+    return null;
+}
+
+function getAutoDirection(target: Point): { dx: number; dy: number } | null {
+    const obstacles = snake.tail.slice(0, snake.tail.length - 1);
+    const path = bfs(
+        { x: snake.x, y: snake.y },
+        target,
+        obstacles,
+        400,
+        400,
+    );
+    if (path && path.length) {
+        const next = path[0];
+        return { dx: next.x - snake.x, dy: next.y - snake.y };
+    }
+
+    const moves = [
+        { dx: 20, dy: 0 },
+        { dx: -20, dy: 0 },
+        { dx: 0, dy: 20 },
+        { dx: 0, dy: -20 },
+    ];
+    for (const m of moves) {
+        const nx = snake.x + m.dx;
+        const ny = snake.y + m.dy;
+        const collision =
+            nx < 0 ||
+            nx >= 400 ||
+            ny < 0 ||
+            ny >= 400 ||
+            snake.tail.some(seg => seg.x === nx && seg.y === ny);
+        if (!collision) return m;
+    }
+    return null;
+}
+
 function gameStep(): void {
     if (multiplayerPlayers.size === 0) return;
-
-    // Follow the first player if available
     const players = Array.from(multiplayerPlayers.values());
-    const target = players[0];
+    let target: MultiplayerPlayer | null = null;
+    let minDist = Infinity;
+    for (const p of players) {
+        const dist = Math.abs(p.x - snake.x) + Math.abs(p.y - snake.y);
+        if (dist < minDist) {
+            minDist = dist;
+            target = p;
+        }
+    }
+
     if (target) {
-        if (target.x > snake.x) {
-            snake.dx = 20; snake.dy = 0;
-        } else if (target.x < snake.x) {
-            snake.dx = -20; snake.dy = 0;
-        } else if (target.y > snake.y) {
-            snake.dx = 0; snake.dy = 20;
-        } else if (target.y < snake.y) {
-            snake.dx = 0; snake.dy = -20;
+        const dir = getAutoDirection({ x: target.x, y: target.y });
+        if (dir) {
+            snake.dx = dir.dx;
+            snake.dy = dir.dy;
         }
     }
 
@@ -116,6 +198,7 @@ function gameStep(): void {
             player.x = Math.floor(Math.random() * 20) * 20;
             player.y = Math.floor(Math.random() * 20) * 20;
             snake.length++;
+            score += 10;
         }
     }
 
