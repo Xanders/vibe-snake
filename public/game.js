@@ -165,6 +165,10 @@ class Game {
                 if (data.type === 'multiplayer-state') {
                     this.remoteSnake = data.snake;
                     this.remotePlayers = data.players;
+                    if (typeof data.score === 'number') {
+                        this.score = data.score;
+                        document.getElementById('score').textContent = this.score;
+                    }
                     this.renderOnlinePlayers();
                     return;
                 }
@@ -239,7 +243,9 @@ class Game {
             }
             this.remotePlayers.forEach(p => {
                 this.ctx.font = '20px Arial';
-                this.ctx.fillText(p.emoji, p.x + 2, p.y + 18);
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText(p.emoji, p.x + 10, p.y + 10);
             });
             this.lastUpdateTime = timestamp;
             requestAnimationFrame(this.gameLoop);
