@@ -193,21 +193,37 @@ class Game {
         // Touch controls for mobile
         let touchStartX = 0;
         let touchStartY = 0;
+        let touchMoved = false;
         this.canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
             const t = e.touches[0];
             touchStartX = t.clientX;
             touchStartY = t.clientY;
+            touchMoved = false;
         }, { passive: false });
         this.canvas.addEventListener('touchmove', (e) => {
             e.preventDefault();
+            touchMoved = true;
         }, { passive: false });
         this.canvas.addEventListener('touchend', (e) => {
             e.preventDefault();
             const t = e.changedTouches[0];
             const dx = t.clientX - touchStartX;
             const dy = t.clientY - touchStartY;
-            if (Math.abs(dx) > Math.abs(dy)) {
+            if (!touchMoved && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+                const rect = this.canvas.getBoundingClientRect();
+                const tapX = t.clientX - rect.left;
+                const tapY = t.clientY - rect.top;
+                const diffX = tapX - (this.snake.x + 10);
+                const diffY = tapY - (this.snake.y + 10);
+                if (Math.abs(diffX) > Math.abs(diffY)) {
+                    if (diffX > 0) this.processDirection('ArrowRight');
+                    else this.processDirection('ArrowLeft');
+                } else {
+                    if (diffY > 0) this.processDirection('ArrowDown');
+                    else this.processDirection('ArrowUp');
+                }
+            } else if (Math.abs(dx) > Math.abs(dy)) {
                 if (dx > 0) this.processDirection('ArrowRight');
                 else this.processDirection('ArrowLeft');
             } else {

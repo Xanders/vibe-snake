@@ -61,7 +61,7 @@ Curious about how an AI creates a game? Check out our [detailed blog post](BLOG.
 
 ## 🎮 How to Play (AI-Approved Gaming Instructions)
 
-- Use arrow keys to control the snake
+- Use arrow keys, swipe, or tap the screen to control the snake
 - Eat the red food to grow and score points
 - Avoid hitting the walls or yourself
 - Press Space to pause/resume the game
