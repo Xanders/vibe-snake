@@ -200,6 +200,7 @@ class Game {
             touchStartX = t.clientX;
             touchStartY = t.clientY;
             touchMoved = false;
+            console.log('touchstart', touchStartX, touchStartY);
         }, { passive: false });
         this.canvas.addEventListener('touchmove', (e) => {
             e.preventDefault();
@@ -210,18 +211,19 @@ class Game {
             const t = e.changedTouches[0];
             const dx = t.clientX - touchStartX;
             const dy = t.clientY - touchStartY;
+            console.log('touchend', { dx, dy, touchMoved });
             if (!touchMoved && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
                 const rect = this.canvas.getBoundingClientRect();
                 const tapX = t.clientX - rect.left;
                 const tapY = t.clientY - rect.top;
                 const diffX = tapX - (this.snake.x + 10);
                 const diffY = tapY - (this.snake.y + 10);
-                if (Math.abs(diffX) > Math.abs(diffY)) {
-                    if (diffX > 0) this.processDirection('ArrowRight');
-                    else this.processDirection('ArrowLeft');
+                const axis = Math.abs(diffX) > Math.abs(diffY) ? 'x' : 'y';
+                console.log('tap', { tapX, tapY, diffX, diffY, axis });
+                if (axis === 'x') {
+                    this.processDirection(diffX > 0 ? 'ArrowRight' : 'ArrowLeft');
                 } else {
-                    if (diffY > 0) this.processDirection('ArrowDown');
-                    else this.processDirection('ArrowUp');
+                    this.processDirection(diffY > 0 ? 'ArrowDown' : 'ArrowUp');
                 }
             } else if (Math.abs(dx) > Math.abs(dy)) {
                 if (dx > 0) this.processDirection('ArrowRight');
