@@ -114,7 +114,6 @@ class Game {
             console.log('Vibe mode toggled:', this.autopilot);
             if (this.autopilot) {
                 this.berryContainer.style.display = 'flex';
-                this.multiContainer.style.display = 'flex';
             } else {
                 this.berryContainer.style.display = 'none';
                 this.multiContainer.style.display = 'none';
@@ -128,6 +127,15 @@ class Game {
         });
         this.berryToggle.addEventListener('change', () => {
             this.berryMode = this.berryToggle.checked;
+            if (this.berryMode) {
+                this.multiContainer.style.display = 'flex';
+            } else {
+                this.multiContainer.style.display = 'none';
+                if (this.multiplayerMode) {
+                    this.multiToggle.checked = false;
+                    this.exitMultiplayer();
+                }
+            }
         });
         this.multiToggle.addEventListener('change', () => {
             this.multiplayerMode = this.multiToggle.checked;
