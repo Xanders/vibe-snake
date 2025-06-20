@@ -212,7 +212,11 @@ class Game {
         }, { passive: false });
         this.canvas.addEventListener('touchmove', (e) => {
             e.preventDefault();
-            touchMoved = true;
+            const t = e.touches[0];
+            // Only mark as moved if the finger travelled far enough
+            if (Math.abs(t.clientX - touchStartX) > 10 || Math.abs(t.clientY - touchStartY) > 10) {
+                touchMoved = true;
+            }
         }, { passive: false });
         this.canvas.addEventListener('touchend', (e) => {
             e.preventDefault();
@@ -220,7 +224,7 @@ class Game {
             const dx = t.clientX - touchStartX;
             const dy = t.clientY - touchStartY;
             console.log('touchend', { dx, dy, touchMoved });
-            if (!touchMoved && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+            if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
                 const rect = this.canvas.getBoundingClientRect();
                 const tapX = t.clientX - rect.left;
                 const tapY = t.clientY - rect.top;
