@@ -168,6 +168,9 @@ class Game {
                 }
                 if (data.type === 'init-multiplayer') {
                     this.playerId = data.id;
+                    if (data.token) {
+                        localStorage.setItem('playerToken', data.token);
+                    }
                     return;
                 }
                 if (data.type === 'multiplayer-state') {
@@ -541,13 +544,18 @@ class Game {
         this.snake.reset();
         this.food.move();
         if (this.ws.readyState === WebSocket.OPEN) {
-            const name = prompt('Enter your name:');
-            if (name) {
-                this.ws.send(JSON.stringify({ type: 'join-multiplayer', name }));
+            const stored = localStorage.getItem('playerToken');
+            if (stored) {
+                this.ws.send(JSON.stringify({ type: 'join-multiplayer', token: stored }));
             } else {
-                this.multiToggle.checked = false;
-                this.onlinePlayersContainer.style.display = 'none';
-                return;
+                const name = prompt('Enter your name:');
+                if (name) {
+                    this.ws.send(JSON.stringify({ type: 'join-multiplayer', name }));
+                } else {
+                    this.multiToggle.checked = false;
+                    this.onlinePlayersContainer.style.display = 'none';
+                    return;
+                }
             }
         }
     }

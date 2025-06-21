@@ -1,4 +1,6 @@
 import * as WebSocket from 'ws';
+import { initDB, createUser, getUserByToken } from './db';
+import { v4 as uuidv4 } from 'uuid';
 
 interface AICategory {
     patterns: string[];
@@ -12,6 +14,10 @@ interface AIResponses {
 const PORT = 49123;
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
+
+initDB().then(() => console.log('Database ready')).catch(err => {
+    console.error('Failed to init database', err);
+});
 
 interface ScoreEntry {
     name: string;
@@ -287,8 +293,27 @@ server.on('connection', (ws: WebSocket) => {
                 sendLeaderboard();
                 return;
             }
-            if (data.type === 'join-multiplayer' && typeof data.name === 'string') {
-                if (!multiplayerPlayers.has(ws)) {
+            if (data.type === 'join-multiplayer') {
+                (async () => {
+                    if (multiplayerPlayers.has(ws)) return;
+                    let name: string | undefined;
+                    let token: string | undefined = typeof data.token === 'string' ? data.token : undefined;
+                    if (token) {
+                        const user = await getUserByToken(token);
+                        if (user) {
+                            name = user.name;
+                        }
+                    }
+                    if (!name && typeof data.name === 'string') {
+                        name = data.name;
+                        token = uuidv4();
+                        await createUser(name!, token!);
+                    }
+                    if (!name || !token) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'invalid auth' }));
+                        return;
+                    }
+
                     const id = Math.random().toString(36).slice(2, 8);
                     const emoji = emojis[Math.floor(Math.random() * emojis.length)];
                     const player: MultiplayerPlayer = {
@@ -297,12 +322,12 @@ server.on('connection', (ws: WebSocket) => {
                         x: Math.floor(Math.random() * 20) * 20,
                         y: Math.floor(Math.random() * 20) * 20,
                         emoji,
-                        name: data.name,
+                        name,
                     };
                     multiplayerPlayers.set(ws, player);
-                    ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji, name: data.name }));
+                    ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji, name, token }));
                     broadcastMultiplayerState();
-                }
+                })();
                 return;
             }
             if (data.type === 'move' && multiplayerPlayers.has(ws) && typeof data.dir === 'string') {
