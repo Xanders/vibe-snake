@@ -1,5 +1,5 @@
 import * as WebSocket from 'ws';
-import { initDB, createUser, getUserByToken } from './db';
+import { initDB, createUser, getUserByToken, getLeastUsedEmoji, updateUserEmoji } from './db';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AICategory {
@@ -298,24 +298,30 @@ server.on('connection', (ws: WebSocket) => {
                     if (multiplayerPlayers.has(ws)) return;
                     let name: string | undefined;
                     let token: string | undefined = typeof data.token === 'string' ? data.token : undefined;
+                    let emoji: string | undefined;
                     if (token) {
                         const user = await getUserByToken(token);
                         if (user) {
                             name = user.name;
+                            emoji = user.emoji || undefined;
                         }
                     }
                     if (!name && typeof data.name === 'string') {
                         name = data.name;
                         token = uuidv4();
-                        await createUser(name!, token!);
+                        emoji = await getLeastUsedEmoji(emojis);
+                        await createUser(name!, token!, emoji);
                     }
                     if (!name || !token) {
                         ws.send(JSON.stringify({ type: 'error', message: 'invalid auth' }));
                         return;
                     }
+                    if (!emoji) {
+                        emoji = await getLeastUsedEmoji(emojis);
+                        await updateUserEmoji(token, emoji);
+                    }
 
                     const id = Math.random().toString(36).slice(2, 8);
-                    const emoji = emojis[Math.floor(Math.random() * emojis.length)];
                     const player: MultiplayerPlayer = {
                         id,
                         ws,
