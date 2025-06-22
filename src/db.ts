@@ -6,6 +6,7 @@ import { open, Database } from 'sqlite';
 export interface User {
     token: string;
     name: string;
+    emoji: string | null;
 }
 
 const DB_PATH = path.join(__dirname, '../db/snake.db');
@@ -22,21 +23,54 @@ export async function initDB(): Promise<void> {
 }
 
 async function createSchema(): Promise<void> {
-    await db.exec(`CREATE TABLE IF NOT EXISTS users (token TEXT PRIMARY KEY, name TEXT)`);
+    await db.exec(`CREATE TABLE IF NOT EXISTS users (
+        token TEXT PRIMARY KEY,
+        name TEXT,
+        emoji TEXT
+    )`);
 }
 
 async function verifySchema(): Promise<void> {
     try {
-        await db.get(`SELECT token, name FROM users LIMIT 1`);
+        await db.get(`SELECT token, name, emoji FROM users LIMIT 1`);
     } catch {
-        await createSchema();
+        // try adding emoji column if it doesn't exist
+        try {
+            await db.exec(`ALTER TABLE users ADD COLUMN emoji TEXT`);
+        } catch {
+            // table might not exist
+            await createSchema();
+        }
     }
 }
 
-export async function createUser(name: string, token: string): Promise<void> {
-    await db.run(`INSERT INTO users (token, name) VALUES (?, ?)`, token, name);
+export async function createUser(name: string, token: string, emoji: string): Promise<void> {
+    await db.run(`INSERT INTO users (token, name, emoji) VALUES (?, ?, ?)`, token, name, emoji);
 }
 
 export async function getUserByToken(token: string): Promise<User | undefined> {
-    return db.get<User>(`SELECT token, name FROM users WHERE token = ?`, token);
+    return db.get<User>(`SELECT token, name, emoji FROM users WHERE token = ?`, token);
+}
+
+export async function updateUserEmoji(token: string, emoji: string): Promise<void> {
+    await db.run(`UPDATE users SET emoji = ? WHERE token = ?`, emoji, token);
+}
+
+export async function getLeastUsedEmoji(emojis: string[]): Promise<string> {
+    const rows = await db.all<{ emoji: string; count: number }[]>(
+        `SELECT emoji, COUNT(*) as count FROM users GROUP BY emoji`
+    );
+    const counts = new Map<string, number>();
+    for (const e of emojis) counts.set(e, 0);
+    for (const r of rows) counts.set(r.emoji, r.count);
+    let selected = emojis[0];
+    let min = Infinity;
+    for (const e of emojis) {
+        const c = counts.get(e) ?? 0;
+        if (c < min) {
+            min = c;
+            selected = e;
+        }
+    }
+    return selected;
 }
