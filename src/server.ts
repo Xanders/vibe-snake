@@ -1,5 +1,15 @@
 import * as WebSocket from 'ws';
-import { initDB, createUser, getUserByToken, getLeastUsedEmoji, updateUserEmoji } from './db';
+import {
+    initDB,
+    createUser,
+    getUserByToken,
+    getLeastUsedEmoji,
+    updateUserEmoji,
+    updateUserId,
+    addMultiplayerScore,
+    getMultiplayerLeaderboard,
+    MultiplayerEntry,
+} from './db';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AICategory {
@@ -15,9 +25,15 @@ const PORT = 49123;
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
 
-initDB().then(() => console.log('Database ready')).catch(err => {
-    console.error('Failed to init database', err);
-});
+initDB()
+    .then(async () => {
+        console.log('Database ready');
+        const rows = await getMultiplayerLeaderboard(20);
+        mpLeaderboard.push(...rows);
+    })
+    .catch(err => {
+        console.error('Failed to init database', err);
+    });
 
 interface ScoreEntry {
     name: string;
@@ -25,6 +41,7 @@ interface ScoreEntry {
 }
 
 const leaderboard: ScoreEntry[] = [];
+const mpLeaderboard: MultiplayerEntry[] = [];
 
 interface MultiplayerPlayer {
     id: string;
@@ -190,11 +207,13 @@ function gameStep(): void {
 
     // Wall collision
     if (snake.x < 0 || snake.x >= 400 || snake.y < 0 || snake.y >= 400) {
+        recordMultiplayerScore();
         resetSnake();
     }
 
     // Self collision
     if (snake.tail.some(seg => seg.x === snake.x && seg.y === snake.y)) {
+        recordMultiplayerScore();
         resetSnake();
     }
 
@@ -270,6 +289,29 @@ function sendLeaderboard(ws?: WebSocket): void {
     }
 }
 
+function sendMpLeaderboard(ws?: WebSocket): void {
+    const payload = JSON.stringify({ type: 'mp-leaderboard', leaderboard: mpLeaderboard });
+    if (ws) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+        }
+    } else {
+        broadcast(payload);
+    }
+}
+
+async function recordMultiplayerScore(): Promise<void> {
+    if (multiplayerPlayers.size === 0) return;
+    const players = Array.from(multiplayerPlayers.values());
+    const names = players.map(p => p.name).join(', ');
+    const ids = players.map(p => p.id).join(',');
+    await addMultiplayerScore(ids, names, score);
+    const rows = await getMultiplayerLeaderboard(20);
+    mpLeaderboard.length = 0;
+    mpLeaderboard.push(...rows);
+    sendMpLeaderboard();
+}
+
 function updateLeaderboard(name: string, score: number): void {
     leaderboard.push({ name, score });
     leaderboard.sort((a, b) => a.score - b.score);
@@ -283,6 +325,7 @@ server.on('connection', (ws: WebSocket) => {
     console.log('New client connected');
     ws.send('🤖 AI: Welcome to Snake Game! Feel free to ask for help or tips!');
     sendLeaderboard(ws);
+    sendMpLeaderboard(ws);
 
     ws.on('message', (message: WebSocket.RawData) => {
         const messageStr = message.toString();
@@ -299,20 +342,23 @@ server.on('connection', (ws: WebSocket) => {
                     let name: string | undefined;
                     let token: string | undefined = typeof data.token === 'string' ? data.token : undefined;
                     let emoji: string | undefined;
+                    let id: string | undefined;
                     if (token) {
                         const user = await getUserByToken(token);
                         if (user) {
                             name = user.name;
                             emoji = user.emoji || undefined;
+                            id = user.id;
                         }
                     }
                     if (!name && typeof data.name === 'string') {
                         name = data.name;
                         token = uuidv4();
+                        id = uuidv4();
                         emoji = await getLeastUsedEmoji(emojis);
-                        await createUser(name!, token!, emoji);
+                        await createUser(id!, name!, token!, emoji);
                     }
-                    if (!name || !token) {
+                    if (!name || !token || !id) {
                         ws.send(JSON.stringify({ type: 'error', message: 'invalid auth' }));
                         return;
                     }
@@ -320,8 +366,11 @@ server.on('connection', (ws: WebSocket) => {
                         emoji = await getLeastUsedEmoji(emojis);
                         await updateUserEmoji(token, emoji);
                     }
+                    if (!id) {
+                        id = uuidv4();
+                        await updateUserId(token, id);
+                    }
 
-                    const id = Math.random().toString(36).slice(2, 8);
                     const player: MultiplayerPlayer = {
                         id,
                         ws,

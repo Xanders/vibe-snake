@@ -93,12 +93,15 @@ class Game {
         this.chatMessages = document.getElementById('chatMessages');
         this.leaderboardElement = document.getElementById('leaderboard');
         this.leaderboard = [];
+        this.mpLeaderboardElement = document.getElementById('mpLeaderboard');
+        this.mpLeaderboard = [];
         this.remoteSnake = null;
         this.remotePlayers = [];
         this.playerId = null;
         this.onlinePlayersList = document.getElementById('onlinePlayersList');
         this.onlinePlayersContainer = document.getElementById('onlinePlayersContainer');
         this.renderLeaderboard();
+        this.renderMpLeaderboard();
 
         // Vibe mode toggle
         this.autopilot = false;
@@ -164,6 +167,11 @@ class Game {
                 if (data.type === 'leaderboard') {
                     this.leaderboard = data.leaderboard;
                     this.renderLeaderboard();
+                    return;
+                }
+                if (data.type === 'mp-leaderboard') {
+                    this.mpLeaderboard = data.leaderboard;
+                    this.renderMpLeaderboard();
                     return;
                 }
                 if (data.type === 'init-multiplayer') {
@@ -525,6 +533,13 @@ class Game {
             .join('');
     }
 
+    renderMpLeaderboard() {
+        if (!this.mpLeaderboardElement) return;
+        this.mpLeaderboardElement.innerHTML = this.mpLeaderboard
+            .map(e => `<li>${e.names} - ${e.score}</li>`)
+            .join('');
+    }
+
     renderOnlinePlayers() {
         if (!this.onlinePlayersList) return;
         this.onlinePlayersList.innerHTML = this.remotePlayers
@@ -534,6 +549,7 @@ class Game {
 
     enterMultiplayer() {
         document.getElementById('leaderboardContainer').style.display = 'none';
+        document.getElementById('mpLeaderboardContainer').style.display = 'block';
         this.onlinePlayersContainer.style.display = 'block';
         this.vibeToggle.disabled = true;
         this.berryToggle.disabled = true;
@@ -562,6 +578,7 @@ class Game {
 
     exitMultiplayer() {
         document.getElementById('leaderboardContainer').style.display = '';
+        document.getElementById('mpLeaderboardContainer').style.display = 'none';
         this.onlinePlayersContainer.style.display = 'none';
         this.vibeToggle.disabled = false;
         this.berryToggle.disabled = false;
