@@ -563,6 +563,8 @@ class Game {
             const stored = localStorage.getItem('playerToken');
             if (stored) {
                 this.ws.send(JSON.stringify({ type: 'join-multiplayer', token: stored }));
+            } else if (window.Telegram && window.Telegram.WebApp && Telegram.WebApp.initData) {
+                this.ws.send(JSON.stringify({ type: 'join-multiplayer', tgInitData: Telegram.WebApp.initData }));
             } else {
                 const name = prompt('Enter your name:');
                 if (name) {

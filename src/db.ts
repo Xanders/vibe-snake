@@ -8,6 +8,8 @@ export interface User {
     token: string;
     name: string;
     emoji: string | null;
+    telegram_id: string | null;
+    nickname: string | null;
 }
 
 const DB_PATH = path.join(__dirname, '../db/snake.db');
@@ -28,7 +30,9 @@ async function createSchema(): Promise<void> {
         token TEXT PRIMARY KEY,
         id TEXT,
         name TEXT,
-        emoji TEXT
+        emoji TEXT,
+        telegram_id TEXT,
+        nickname TEXT
     )`);
     await db.exec(`CREATE TABLE IF NOT EXISTS mp_leaderboard (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +45,7 @@ async function createSchema(): Promise<void> {
 
 async function verifySchema(): Promise<void> {
     try {
-        await db.get(`SELECT token, id, name, emoji FROM users LIMIT 1`);
+        await db.get(`SELECT token, id, name, emoji, telegram_id, nickname FROM users LIMIT 1`);
     } catch {
         try {
             await db.exec(`ALTER TABLE users ADD COLUMN id TEXT`);
@@ -49,9 +53,15 @@ async function verifySchema(): Promise<void> {
         try {
             await db.exec(`ALTER TABLE users ADD COLUMN emoji TEXT`);
         } catch {}
+        try {
+            await db.exec(`ALTER TABLE users ADD COLUMN telegram_id TEXT`);
+        } catch {}
+        try {
+            await db.exec(`ALTER TABLE users ADD COLUMN nickname TEXT`);
+        } catch {}
         // if table still invalid create from scratch
         try {
-            await db.get(`SELECT token, id, name, emoji FROM users LIMIT 1`);
+            await db.get(`SELECT token, id, name, emoji, telegram_id, nickname FROM users LIMIT 1`);
         } catch {
             await createSchema();
         }
@@ -71,18 +81,37 @@ async function verifySchema(): Promise<void> {
     }
 }
 
-export async function createUser(id: string, name: string, token: string, emoji: string): Promise<void> {
+export async function createUser(
+    id: string,
+    name: string,
+    token: string,
+    emoji: string,
+    telegram_id?: string | null,
+    nickname?: string | null,
+): Promise<void> {
     await db.run(
-        `INSERT INTO users (token, id, name, emoji) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO users (token, id, name, emoji, telegram_id, nickname) VALUES (?, ?, ?, ?, ?, ?)`,
         token,
         id,
         name,
         emoji,
+        telegram_id ?? null,
+        nickname ?? null,
     );
 }
 
 export async function getUserByToken(token: string): Promise<User | undefined> {
-    return db.get<User>(`SELECT token, id, name, emoji FROM users WHERE token = ?`, token);
+    return db.get<User>(
+        `SELECT token, id, name, emoji, telegram_id, nickname FROM users WHERE token = ?`,
+        token,
+    );
+}
+
+export async function getUserByTelegramId(tgId: string): Promise<User | undefined> {
+    return db.get<User>(
+        `SELECT token, id, name, emoji, telegram_id, nickname FROM users WHERE telegram_id = ?`,
+        tgId,
+    );
 }
 
 export async function updateUserEmoji(token: string, emoji: string): Promise<void> {
