@@ -3,6 +3,7 @@ import {
     initDB,
     createUser,
     getUserByToken,
+    getUserByTelegramId,
     getLeastUsedEmoji,
     updateUserEmoji,
     updateUserId,
@@ -11,6 +12,7 @@ import {
     MultiplayerEntry,
 } from './db';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
 interface AICategory {
     patterns: string[];
@@ -22,8 +24,52 @@ interface AIResponses {
 }
 
 const PORT = 49123;
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
+
+interface TelegramAuthResult {
+    telegram_id: string;
+    display_name: string;
+    nickname: string | null;
+}
+
+function verifyTelegramInitData(initData: string): TelegramAuthResult | null {
+    if (!BOT_TOKEN) return null;
+    try {
+        const params = new URLSearchParams(initData);
+        const hash = params.get('hash');
+        if (!hash) return null;
+        const dataPairs: string[] = [];
+        params.forEach((v, k) => {
+            if (k !== 'hash' && k !== 'signature') {
+                dataPairs.push(`${k}=${v}`);
+            }
+        });
+        dataPairs.sort();
+        const dataCheckString = dataPairs.join('\n');
+        const secret = crypto
+            .createHmac('sha256', 'WebAppData')
+            .update(BOT_TOKEN)
+            .digest();
+        const hmac = crypto
+            .createHmac('sha256', secret)
+            .update(dataCheckString)
+            .digest('hex');
+        if (hmac !== hash) return null;
+        const userStr = params.get('user');
+        if (!userStr) return null;
+        const user = JSON.parse(userStr);
+        const display_name = [user.first_name, user.last_name]
+            .filter(Boolean)
+            .join(' ');
+        const nickname = user.username || null;
+        const telegram_id = String(user.id);
+        return { telegram_id, display_name, nickname };
+    } catch {
+        return null;
+    }
+}
 
 initDB()
     .then(async () => {
@@ -351,12 +397,30 @@ server.on('connection', (ws: WebSocket) => {
                             id = user.id;
                         }
                     }
+                    if (!name && typeof data.tgInitData === 'string') {
+                        const auth = verifyTelegramInitData(data.tgInitData);
+                        if (auth) {
+                            const user = await getUserByTelegramId(auth.telegram_id);
+                            if (user) {
+                                name = user.name;
+                                emoji = user.emoji || undefined;
+                                id = user.id;
+                                token = user.token;
+                            } else {
+                                name = auth.display_name;
+                                token = uuidv4();
+                                id = uuidv4();
+                                emoji = await getLeastUsedEmoji(emojis);
+                                await createUser(id, name, token, emoji, auth.telegram_id, auth.nickname);
+                            }
+                        }
+                    }
                     if (!name && typeof data.name === 'string') {
                         name = data.name;
                         token = uuidv4();
                         id = uuidv4();
                         emoji = await getLeastUsedEmoji(emojis);
-                        await createUser(id!, name!, token!, emoji);
+                        await createUser(id!, name!, token!, emoji, undefined, undefined);
                     }
                     if (!name || !token || !id) {
                         ws.send(JSON.stringify({ type: 'error', message: 'invalid auth' }));
