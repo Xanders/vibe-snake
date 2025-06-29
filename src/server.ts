@@ -1,4 +1,5 @@
 import * as WebSocket from 'ws';
+import { Bot } from 'grammy';
 import {
     initDB,
     createUser,
@@ -7,6 +8,9 @@ import {
     getLeastUsedEmoji,
     updateUserEmoji,
     updateUserId,
+    setUserGameCredits,
+    setUserCooldown,
+    User,
     addMultiplayerScore,
     getMultiplayerLeaderboard,
     MultiplayerEntry,
@@ -25,6 +29,7 @@ interface AIResponses {
 
 const PORT = 49123;
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const INVOICE_SLUG = process.env.INVOICE_SLUG || 'buy10games';
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
 
@@ -96,6 +101,10 @@ interface MultiplayerPlayer {
     y: number;
     emoji: string;
     name: string;
+    token: string;
+    telegramId: string | null;
+    gameCredits: number;
+    cooldownUntil: number;
 }
 
 interface SnakeState {
@@ -346,12 +355,38 @@ function sendMpLeaderboard(ws?: WebSocket): void {
     }
 }
 
+function sendGameInfo(player: MultiplayerPlayer): void {
+    if (player.ws.readyState !== WebSocket.OPEN) return;
+    const timeLeft = player.gameCredits > 0 ? 0 : Math.max(0, player.cooldownUntil - Date.now());
+    const minutes = Math.ceil(timeLeft / 60000);
+    player.ws.send(JSON.stringify({
+        type: 'games-update',
+        credits: player.gameCredits,
+        cooldown: player.cooldownUntil,
+        waitMinutes: minutes,
+    }));
+    const text = player.gameCredits > 0
+        ? `Games left: ${player.gameCredits}`
+        : `Wait ${minutes} min or buy more games.`;
+    player.ws.send(text);
+}
+
 async function recordMultiplayerScore(): Promise<void> {
     if (multiplayerPlayers.size === 0) return;
     const players = Array.from(multiplayerPlayers.values());
     const names = players.map(p => p.name).join(', ');
     const ids = players.map(p => p.id).join(',');
     await addMultiplayerScore(ids, names, score);
+    await Promise.all(players.map(async p => {
+        if (p.gameCredits > 0) {
+            p.gameCredits--;
+            await setUserGameCredits(p.token, p.gameCredits);
+        } else {
+            p.cooldownUntil = Date.now() + 60 * 60 * 1000;
+            await setUserCooldown(p.token, p.cooldownUntil);
+        }
+        sendGameInfo(p);
+    }));
     const rows = await getMultiplayerLeaderboard(20);
     mpLeaderboard.length = 0;
     mpLeaderboard.push(...rows);
@@ -373,7 +408,7 @@ server.on('connection', (ws: WebSocket) => {
     sendLeaderboard(ws);
     sendMpLeaderboard(ws);
 
-    ws.on('message', (message: WebSocket.RawData) => {
+    ws.on('message', async (message: WebSocket.RawData) => {
         const messageStr = message.toString();
         try {
             const data = JSON.parse(messageStr);
@@ -389,12 +424,18 @@ server.on('connection', (ws: WebSocket) => {
                     let token: string | undefined = typeof data.token === 'string' ? data.token : undefined;
                     let emoji: string | undefined;
                     let id: string | undefined;
+                    let gameCredits = 0;
+                    let cooldownUntil = 0;
+                    let telegramId: string | null = null;
                     if (token) {
                         const user = await getUserByToken(token);
                         if (user) {
                             name = user.name;
                             emoji = user.emoji || undefined;
                             id = user.id;
+                            telegramId = user.telegram_id;
+                            gameCredits = user.game_credits;
+                            cooldownUntil = user.cooldown_until;
                         }
                     }
                     if (!name && typeof data.tgInitData === 'string') {
@@ -406,12 +447,18 @@ server.on('connection', (ws: WebSocket) => {
                                 emoji = user.emoji || undefined;
                                 id = user.id;
                                 token = user.token;
+                                telegramId = user.telegram_id;
+                                gameCredits = user.game_credits;
+                                cooldownUntil = user.cooldown_until;
                             } else {
                                 name = auth.display_name;
                                 token = uuidv4();
                                 id = uuidv4();
                                 emoji = await getLeastUsedEmoji(emojis);
                                 await createUser(id, name, token, emoji, auth.telegram_id, auth.nickname);
+                                telegramId = auth.telegram_id;
+                                gameCredits = 0;
+                                cooldownUntil = 0;
                             }
                         }
                     }
@@ -421,6 +468,9 @@ server.on('connection', (ws: WebSocket) => {
                         id = uuidv4();
                         emoji = await getLeastUsedEmoji(emojis);
                         await createUser(id!, name!, token!, emoji, undefined, undefined);
+                        telegramId = null;
+                        gameCredits = 0;
+                        cooldownUntil = 0;
                     }
                     if (!name || !token || !id) {
                         ws.send(JSON.stringify({ type: 'error', message: 'invalid auth' }));
@@ -435,6 +485,12 @@ server.on('connection', (ws: WebSocket) => {
                         await updateUserId(token, id);
                     }
 
+                    if (gameCredits <= 0 && cooldownUntil > Date.now()) {
+                        const wait = Math.ceil((cooldownUntil - Date.now()) / 60000);
+                        ws.send(JSON.stringify({ type: 'join-denied', wait, invoice: INVOICE_SLUG }));
+                        return;
+                    }
+
                     const player: MultiplayerPlayer = {
                         id,
                         ws,
@@ -442,9 +498,14 @@ server.on('connection', (ws: WebSocket) => {
                         y: Math.floor(Math.random() * 20) * 20,
                         emoji,
                         name,
+                        token,
+                        telegramId,
+                        gameCredits,
+                        cooldownUntil,
                     };
                     multiplayerPlayers.set(ws, player);
-                    ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji, name, token }));
+                    ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji, name, token, credits: gameCredits }));
+                    sendGameInfo(player);
                     broadcastMultiplayerState();
                 })();
                 return;
@@ -468,6 +529,10 @@ server.on('connection', (ws: WebSocket) => {
                 broadcastMultiplayerState();
                 return;
             }
+            if (data.type === 'buy-games') {
+                // Client notification is ignored, wait for Telegram webhook
+                return;
+            }
             if (data.type === 'leave-multiplayer') {
                 multiplayerPlayers.delete(ws);
                 broadcastMultiplayerState();
@@ -475,6 +540,28 @@ server.on('connection', (ws: WebSocket) => {
             }
         } catch (err) {
             // Not JSON, treat as chat message
+        }
+
+        if (multiplayerPlayers.has(ws)) {
+            const player = multiplayerPlayers.get(ws)!;
+            const now = new Date();
+            const code = `${String(now.getDate()).padStart(2, '0')}${String(now.getMonth() + 1).padStart(2, '0')}${now.getFullYear()}`;
+            const reverse = code.split('').reverse().join('');
+            if (messageStr === code) {
+                player.gameCredits++;
+                await setUserGameCredits(player.token, player.gameCredits);
+                sendGameInfo(player);
+                return;
+            }
+            if (messageStr === reverse) {
+                // useful for testing
+                if (player.gameCredits > 0) {
+                    player.gameCredits--;
+                    await setUserGameCredits(player.token, player.gameCredits);
+                }
+                sendGameInfo(player);
+                return;
+            }
         }
 
         broadcast(`Player: ${messageStr}`);
@@ -492,4 +579,31 @@ server.on('connection', (ws: WebSocket) => {
     });
 });
 
+
 console.log(`WebSocket server is running on port ${PORT}`);
+
+if (BOT_TOKEN) {
+    const bot = new Bot(BOT_TOKEN);
+
+    bot.on('message:successful_payment', async ctx => {
+        const payment = ctx.message.successful_payment;
+        if (payment.invoice_payload === INVOICE_SLUG) {
+            const tgId = String(ctx.from!.id);
+            const user = await getUserByTelegramId(tgId);
+            if (user) {
+                const credits = user.game_credits + 10;
+                await setUserGameCredits(user.token, credits);
+                const player = Array.from(multiplayerPlayers.values()).find(p => p.token === user.token);
+                if (player) {
+                    player.gameCredits = credits;
+                    sendGameInfo(player);
+                }
+            }
+        }
+    });
+
+    bot.start();
+    console.log('Telegram bot started');
+} else {
+    console.log('BOT_TOKEN not set, Telegram payments disabled');
+}

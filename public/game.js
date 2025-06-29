@@ -100,6 +100,18 @@ class Game {
         this.playerId = null;
         this.onlinePlayersList = document.getElementById('onlinePlayersList');
         this.onlinePlayersContainer = document.getElementById('onlinePlayersContainer');
+        this.invoiceSlug = null;
+        this.creditInfo = document.getElementById('creditInfo');
+        this.creditMessage = document.getElementById('creditMessage');
+        this.buyGamesBtn = document.getElementById('buyGamesBtn');
+        this.buyGamesBtn.addEventListener('click', () => this.buyGames());
+        if (window.Telegram && Telegram.WebApp) {
+            Telegram.WebApp.onEvent('invoiceClosed', (status) => {
+                if (status === 'paid') {
+                    // server will grant credits after verifying payment
+                }
+            });
+        }
         this.renderLeaderboard();
         this.renderMpLeaderboard();
 
@@ -179,6 +191,9 @@ class Game {
                     if (data.token) {
                         localStorage.setItem('playerToken', data.token);
                     }
+                    if (typeof data.credits === 'number') {
+                        this.updateCredits(data.credits, 0);
+                    }
                     return;
                 }
                 if (data.type === 'multiplayer-state') {
@@ -189,6 +204,17 @@ class Game {
                         document.getElementById('score').textContent = this.score;
                     }
                     this.renderOnlinePlayers();
+                    return;
+                }
+                if (data.type === 'games-update') {
+                    this.updateCredits(data.credits, data.waitMinutes);
+                    return;
+                }
+                if (data.type === 'join-denied') {
+                    this.invoiceSlug = data.invoice;
+                    this.creditInfo.style.display = 'block';
+                    this.buyGamesBtn.style.display = 'inline-block';
+                    this.creditMessage.textContent = `Please wait ${data.wait} min or buy more games.`;
                     return;
                 }
             } catch (e) {
@@ -551,6 +577,7 @@ class Game {
         document.getElementById('leaderboardContainer').style.display = 'none';
         document.getElementById('mpLeaderboardContainer').style.display = 'block';
         this.onlinePlayersContainer.style.display = 'block';
+        this.updateCredits(0, 0);
         this.vibeToggle.disabled = true;
         this.berryToggle.disabled = true;
         this.vibeToggle.checked = false;
@@ -597,6 +624,7 @@ class Game {
         this.renderOnlinePlayers();
         this.playerId = null;
         this.reset();
+        this.updateCredits(0, 0);
     }
 
     submitScoreIfEligible() {
@@ -619,6 +647,26 @@ class Game {
             console.log('Sending message:', message);
             this.ws.send(message);
             this.chatInput.value = '';
+        }
+    }
+
+    updateCredits(credits, wait) {
+        if (credits > 0) {
+            this.creditInfo.style.display = 'block';
+            this.buyGamesBtn.style.display = 'none';
+            this.creditMessage.textContent = `Games left: ${credits}`;
+        } else if (wait > 0) {
+            this.creditInfo.style.display = 'block';
+            this.buyGamesBtn.style.display = 'inline-block';
+            this.creditMessage.textContent = `Wait ${wait} min or buy more games.`;
+        } else {
+            this.creditInfo.style.display = 'none';
+        }
+    }
+
+    buyGames() {
+        if (window.Telegram && Telegram.WebApp && this.invoiceSlug) {
+            Telegram.WebApp.openInvoice(this.invoiceSlug);
         }
     }
 }

@@ -145,6 +145,18 @@
         .chat-send:hover {
             background-color: #45a049;
         }
+        .credit-info {
+            margin-top: 10px;
+            text-align: center;
+        }
+        #buyGamesBtn {
+            margin-top: 5px;
+            padding: 5px 10px;
+            background: #ffd800;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
         .leaderboard-container {
             margin-top: 20px;
             width: 100%;
@@ -172,6 +184,10 @@
                 <input type="text" class="chat-input" id="chatInput" placeholder="Type your message...">
                 <button class="chat-send" id="chatSend">Send</button>
             </div>
+        </div>
+        <div id="creditInfo" class="credit-info" style="display:none;">
+            <p id="creditMessage"></p>
+            <button id="buyGamesBtn" style="display:none;">Buy 10 games (99 ⭐)</button>
         </div>
     </div>
     <div id="onlinePlayersContainer" class="online-players" style="display:none;">
