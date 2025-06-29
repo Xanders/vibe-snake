@@ -56,8 +56,19 @@ Curious about how an AI creates a game? Check out our [detailed blog post](BLOG.
 
 4. Open your browser and navigate to:
    ```
-   http://localhost:8080
-   ```
+http://localhost:8080
+```
+
+## ⚙️ Telegram Setup
+
+To enable payments via **Telegram Stars**, create a bot with [@BotFather](https://t.me/BotFather) and generate an invoice link for purchasing 10 games (priced at 99 Stars). Copy the slug from the link and set the following environment variables when starting the server:
+
+```bash
+BOT_TOKEN=<your_bot_token>
+INVOICE_SLUG=<invoice_slug_from_link>
+```
+
+The server uses [grammY](https://grammy.dev/) in polling mode to listen for `successful_payment` updates and will automatically credit the user once a payment is confirmed. No webhook configuration is required.
 
 ## 🎮 How to Play (AI-Approved Gaming Instructions)
 
