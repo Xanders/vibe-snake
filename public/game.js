@@ -168,8 +168,22 @@ class Game {
         console.log('Connecting to WebSocket:', url);
         this.ws = new WebSocket(url);
         this.ws.onopen = () => console.log('WebSocket connection opened');
-        this.ws.onerror = (err) => console.error('WebSocket error:', err);
-        this.ws.onclose = () => console.log('WebSocket connection closed');
+        this.ws.onerror = (err) => {
+            console.error('WebSocket error:', err);
+            if (this.multiplayerMode) {
+                this.showConnectionError();
+                this.exitMultiplayer();
+                this.multiToggle.disabled = true;
+            }
+        };
+        this.ws.onclose = () => {
+            console.log('WebSocket connection closed');
+            if (this.multiplayerMode) {
+                this.showConnectionError(); 
+                this.exitMultiplayer();
+                this.multiToggle.disabled = true;
+            }
+        };
         
         // Handle incoming messages from WebSocket
         this.ws.onmessage = (event) => {
@@ -227,6 +241,12 @@ class Game {
                     console.error('Server error:', data.message);
                     if (data.message === 'invalid auth') {
                         localStorage.removeItem('playerToken');
+                        // Show error message on canvas
+                        this.showConnectionError();
+                        // Exit multiplayer mode
+                        this.exitMultiplayer();
+                        // Disable multiplayer toggle
+                        this.multiToggle.disabled = true;
                     }
                     return;
                 }
@@ -687,6 +707,34 @@ class Game {
         if (this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({ type: 'get-invoice' }));
         }
+    }
+
+    showConnectionError() {
+        // Clear the canvas
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw semi-transparent overlay
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw error message
+        this.ctx.fillStyle = '#ff4444';
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+        
+        this.ctx.fillText('Failed to connect to server', centerX, centerY - 20);
+        
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '18px Arial';
+        this.ctx.fillText('Please contact developers', centerX, centerY + 20);
+        
+        // Set flags to block interaction
+        this.gameOver = true;
+        this.multiplayerMode = false;
     }
 }
 
