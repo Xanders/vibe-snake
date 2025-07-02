@@ -40,7 +40,10 @@ interface TelegramAuthResult {
 }
 
 function verifyTelegramInitData(initData: string): TelegramAuthResult | null {
-    if (!BOT_TOKEN) return null;
+    if (!BOT_TOKEN) {
+        console.warn('BOT_TOKEN not set, cannot verify Telegram data');
+        return null;
+    }
     try {
         const params = new URLSearchParams(initData);
         const hash = params.get('hash');
@@ -61,7 +64,10 @@ function verifyTelegramInitData(initData: string): TelegramAuthResult | null {
             .createHmac('sha256', secret)
             .update(dataCheckString)
             .digest('hex');
-        if (hmac !== hash) return null;
+        if (hmac !== hash) {
+            console.warn('Telegram auth hash mismatch');
+            return null;
+        }
         const userStr = params.get('user');
         if (!userStr) return null;
         const user = JSON.parse(userStr);
@@ -71,7 +77,8 @@ function verifyTelegramInitData(initData: string): TelegramAuthResult | null {
         const nickname = user.username || null;
         const telegram_id = String(user.id);
         return { telegram_id, display_name, nickname };
-    } catch {
+    } catch (err) {
+        console.warn('Failed to parse Telegram init data', err);
         return null;
     }
 }
@@ -419,6 +426,11 @@ server.on('connection', (ws: WebSocket) => {
             }
             if (data.type === 'join-multiplayer') {
                 (async () => {
+                    console.log('Join request', {
+                        hasToken: typeof data.token === 'string',
+                        hasTg: typeof data.tgInitData === 'string',
+                        hasName: typeof data.name === 'string',
+                    });
                     if (multiplayerPlayers.has(ws)) return;
                     let name: string | undefined;
                     let token: string | undefined = typeof data.token === 'string' ? data.token : undefined;
@@ -436,6 +448,8 @@ server.on('connection', (ws: WebSocket) => {
                             telegramId = user.telegram_id;
                             gameCredits = user.game_credits;
                             cooldownUntil = user.cooldown_until;
+                        } else {
+                            console.log('Token not found:', token);
                         }
                     }
                     if (!name && typeof data.tgInitData === 'string') {
@@ -459,7 +473,10 @@ server.on('connection', (ws: WebSocket) => {
                                 telegramId = auth.telegram_id;
                                 gameCredits = 0;
                                 cooldownUntil = 0;
+                                console.log('Created new user from Telegram', name);
                             }
+                        } else {
+                            console.log('Failed to verify tgInitData');
                         }
                     }
                     if (!name && typeof data.name === 'string') {
@@ -471,8 +488,10 @@ server.on('connection', (ws: WebSocket) => {
                         telegramId = null;
                         gameCredits = 0;
                         cooldownUntil = 0;
+                        console.log('Created new user from name', name);
                     }
                     if (!name || !token || !id) {
+                        console.warn('Join failed, missing fields', { name, token, id });
                         ws.send(JSON.stringify({ type: 'error', message: 'invalid auth' }));
                         return;
                     }
@@ -504,6 +523,7 @@ server.on('connection', (ws: WebSocket) => {
                         cooldownUntil,
                     };
                     multiplayerPlayers.set(ws, player);
+                    console.log('Player joined', { name, id, telegramId });
                     ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji, name, token, credits: gameCredits }));
                     sendGameInfo(player);
                     broadcastMultiplayerState();
@@ -534,6 +554,10 @@ server.on('connection', (ws: WebSocket) => {
                 return;
             }
             if (data.type === 'leave-multiplayer') {
+                const player = multiplayerPlayers.get(ws);
+                if (player) {
+                    console.log('Player left', { name: player.name, id: player.id });
+                }
                 multiplayerPlayers.delete(ws);
                 broadcastMultiplayerState();
                 return;
@@ -574,8 +598,13 @@ server.on('connection', (ws: WebSocket) => {
 
     ws.on('close', () => {
         clients.delete(ws);
+        const player = multiplayerPlayers.get(ws);
+        if (player) {
+            console.log('Client disconnected', { name: player.name, id: player.id });
+        } else {
+            console.log('Client disconnected');
+        }
         multiplayerPlayers.delete(ws);
-        console.log('Client disconnected');
     });
 });
 
