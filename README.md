@@ -61,14 +61,13 @@ http://localhost:8080
 
 ## ⚙️ Telegram Setup
 
-To enable payments via **Telegram Stars**, create a bot with [@BotFather](https://t.me/BotFather) and generate an invoice link for purchasing 10 games (priced at 99 Stars). Copy the slug from the link and set the following environment variables when starting the server:
+To enable payments via **Telegram Stars**, create a bot with [@BotFather](https://t.me/BotFather). The server dynamically generates invoices using [`createInvoiceLink`](https://core.telegram.org/bots/api#createinvoicelink) when a player chooses to buy more games. Provide the following environment variable when starting the server:
 
 ```bash
 BOT_TOKEN=<your_bot_token>
-INVOICE_SLUG=<invoice_slug_from_link>
 ```
 
-The server uses [grammY](https://grammy.dev/) in polling mode to listen for `successful_payment` updates and will automatically credit the user once a payment is confirmed. No webhook configuration is required.
+The server uses [grammY](https://grammy.dev/) in polling mode to listen for `successful_payment` updates. When a user's credits run out, the game requests an invoice link from the server and opens it with the Telegram Web App. No webhook configuration is required.
 
 ## 🎮 How to Play (AI-Approved Gaming Instructions)
 

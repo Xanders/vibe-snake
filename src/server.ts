@@ -29,7 +29,12 @@ interface AIResponses {
 
 const PORT = 49123;
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const INVOICE_SLUG = process.env.INVOICE_SLUG || 'buy10games';
+const INVOICE_PAYLOAD = 'buy10games';
+const GAME_PRICE = 99; // Stars
+let bot: Bot | null = null;
+if (BOT_TOKEN) {
+    bot = new Bot(BOT_TOKEN);
+}
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
 
@@ -487,7 +492,7 @@ server.on('connection', (ws: WebSocket) => {
 
                     if (gameCredits <= 0 && cooldownUntil > Date.now()) {
                         const wait = Math.ceil((cooldownUntil - Date.now()) / 60000);
-                        ws.send(JSON.stringify({ type: 'join-denied', wait, invoice: INVOICE_SLUG }));
+                        ws.send(JSON.stringify({ type: 'join-denied', wait }));
                         return;
                     }
 
@@ -529,8 +534,22 @@ server.on('connection', (ws: WebSocket) => {
                 broadcastMultiplayerState();
                 return;
             }
-            if (data.type === 'buy-games') {
-                // Client notification is ignored, wait for Telegram webhook
+            if (data.type === 'get-invoice') {
+                if (bot) {
+                    try {
+                        const link = await bot.api.createInvoiceLink(
+                            '10 Games',
+                            'Play ten multiplayer games',
+                            INVOICE_PAYLOAD,
+                            '',
+                            'XTR',
+                            [{ label: '10 games', amount: GAME_PRICE * 100 }]
+                        );
+                        ws.send(JSON.stringify({ type: 'invoice-link', link }));
+                    } catch (err) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'failed to create invoice' }));
+                    }
+                }
                 return;
             }
             if (data.type === 'leave-multiplayer') {
@@ -582,12 +601,11 @@ server.on('connection', (ws: WebSocket) => {
 
 console.log(`WebSocket server is running on port ${PORT}`);
 
-if (BOT_TOKEN) {
-    const bot = new Bot(BOT_TOKEN);
+if (bot) {
 
     bot.on('message:successful_payment', async ctx => {
         const payment = ctx.message.successful_payment;
-        if (payment.invoice_payload === INVOICE_SLUG) {
+        if (payment.invoice_payload === INVOICE_PAYLOAD) {
             const tgId = String(ctx.from!.id);
             const user = await getUserByTelegramId(tgId);
             if (user) {
