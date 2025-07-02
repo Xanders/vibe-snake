@@ -223,6 +223,13 @@ class Game {
                     }
                     return;
                 }
+                if (data.type === 'error') {
+                    console.error('Server error:', data.message);
+                    if (data.message === 'invalid auth') {
+                        localStorage.removeItem('playerToken');
+                    }
+                    return;
+                }
             } catch (e) {
                 // not JSON
             }
@@ -593,21 +600,27 @@ class Game {
         this.snake.reset();
         this.food.move();
         if (this.ws.readyState === WebSocket.OPEN) {
+            const payload = { type: 'join-multiplayer' };
             const stored = localStorage.getItem('playerToken');
+            const hasTg = window.Telegram && window.Telegram.WebApp && Telegram.WebApp.initData;
             if (stored) {
-                this.ws.send(JSON.stringify({ type: 'join-multiplayer', token: stored }));
-            } else if (window.Telegram && window.Telegram.WebApp && Telegram.WebApp.initData) {
-                this.ws.send(JSON.stringify({ type: 'join-multiplayer', tgInitData: Telegram.WebApp.initData }));
-            } else {
+                payload.token = stored;
+            }
+            if (hasTg) {
+                payload.tgInitData = Telegram.WebApp.initData;
+            }
+            if (!stored && !hasTg) {
                 const name = prompt('Enter your name:');
                 if (name) {
-                    this.ws.send(JSON.stringify({ type: 'join-multiplayer', name }));
+                    payload.name = name;
                 } else {
                     this.multiToggle.checked = false;
                     this.onlinePlayersContainer.style.display = 'none';
                     return;
                 }
             }
+            console.log('Sending join request', payload);
+            this.ws.send(JSON.stringify(payload));
         }
     }
 
