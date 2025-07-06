@@ -46,41 +46,71 @@ interface TelegramAuthResult {
 
 function verifyTelegramInitData(initData: string): TelegramAuthResult | null {
     if (!BOT_TOKEN) {
-        console.warn('BOT_TOKEN not set, cannot verify Telegram data');
+        console.error('BOT_TOKEN is not set');
         return null;
     }
     try {
         const params = new URLSearchParams(initData);
         const hash = params.get('hash');
-        if (!hash) return null;
+        if (!hash) {
+            console.warn('No hash in Telegram init data');
+            return null;
+        }
+        
+        // Collect all parameters except hash
         const dataPairs: string[] = [];
-        params.forEach((v, k) => {
-            if (k !== 'hash' && k !== 'signature') {
-                dataPairs.push(`${k}=${v}`);
+        for (const [key, value] of params.entries()) {
+            if (key !== 'hash') {
+                dataPairs.push(`${key}=${value}`);
             }
-        });
+        }
+        
+        // Sort parameters alphabetically by key
         dataPairs.sort();
         const dataCheckString = dataPairs.join('\n');
+        
+        console.log('Bot token length:', BOT_TOKEN.length);
+        console.log('Data pairs:', dataPairs);
+        console.log('Data check string:', dataCheckString);
+        console.log('Hash from Telegram:', hash);
+        
+        // Create secret key: HMAC-SHA256(BOT_TOKEN, "WebAppData")
         const secret = crypto
             .createHmac('sha256', 'WebAppData')
             .update(BOT_TOKEN)
             .digest();
+        
+        console.log('Secret key (hex):', secret.toString('hex'));
+            
+        // Create final hash: HMAC-SHA256(dataCheckString, secret)
         const hmac = crypto
             .createHmac('sha256', secret)
             .update(dataCheckString)
             .digest('hex');
+            
+        console.log('Calculated hash:', hmac);
+        
         if (hmac !== hash) {
             console.warn('Telegram auth hash mismatch');
+            console.warn('Expected:', hmac);
+            console.warn('Received:', hash);
             return null;
         }
+        
         const userStr = params.get('user');
-        if (!userStr) return null;
+        if (!userStr) {
+            console.warn('No user data in Telegram init data');
+            return null;
+        }
+        
         const user = JSON.parse(userStr);
         const display_name = [user.first_name, user.last_name]
             .filter(Boolean)
             .join(' ');
         const nickname = user.username || null;
         const telegram_id = String(user.id);
+        
+        console.log('Telegram auth successful for user:', display_name);
         return { telegram_id, display_name, nickname };
     } catch (err) {
         console.warn('Failed to parse Telegram init data', err);
@@ -504,10 +534,7 @@ server.on('connection', (ws: WebSocket) => {
                         emoji = await getLeastUsedEmoji(emojis);
                         await updateUserEmoji(token, emoji);
                     }
-                    if (!id) {
-                        id = uuidv4();
-                        await updateUserId(token, id);
-                    }
+                    // id is already guaranteed to be set by this point
 
                     if (gameCredits <= 0 && cooldownUntil > Date.now()) {
                         const wait = Math.ceil((cooldownUntil - Date.now()) / 60000);
