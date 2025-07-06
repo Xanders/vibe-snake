@@ -38,6 +38,9 @@ if (BOT_TOKEN) {
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
 
+// Track token associated with each websocket even if the user is currently not in the multiplayer room.
+const socketTokens = new Map<WebSocket, string>();
+
 interface TelegramAuthResult {
     telegram_id: string;
     display_name: string;
@@ -545,8 +548,15 @@ server.on('connection', (ws: WebSocket) => {
                     if (gameCredits <= 0 && cooldownUntil > Date.now()) {
                         const wait = Math.ceil((cooldownUntil - Date.now()) / 60000);
                         ws.send(JSON.stringify({ type: 'join-denied', wait }));
+                        // Persist token for future cheat-codes even if join is denied
+                        if (token) {
+                            socketTokens.set(ws, token);
+                        }
                         return;
                     }
+
+                    // Remember token for miscellaneous operations (e.g. cheat-codes)
+                    socketTokens.set(ws, token);
 
                     const player: MultiplayerPlayer = {
                         id,
@@ -611,6 +621,7 @@ server.on('connection', (ws: WebSocket) => {
                     console.log('Player left', { name: player.name, id: player.id });
                 }
                 multiplayerPlayers.delete(ws);
+                socketTokens.delete(ws);
                 broadcastMultiplayerState();
                 return;
             }
@@ -618,24 +629,45 @@ server.on('connection', (ws: WebSocket) => {
             // Not JSON, treat as chat message
         }
 
-        if (multiplayerPlayers.has(ws)) {
-            const player = multiplayerPlayers.get(ws)!;
+        // Allow cheat-codes even when the user is not currently in the multiplayer game.
+        const associatedToken = socketTokens.get(ws);
+        if (multiplayerPlayers.has(ws) || associatedToken) {
+            const player = multiplayerPlayers.get(ws) ?? undefined;
             const now = new Date();
             const code = `${String(now.getDate()).padStart(2, '0')}${String(now.getMonth() + 1).padStart(2, '0')}${now.getFullYear()}`;
             const reverse = code.split('').reverse().join('');
             if (messageStr === code) {
-                player.gameCredits++;
-                await setUserGameCredits(player.token, player.gameCredits);
-                sendGameInfo(player);
+                if (player) {
+                    player.gameCredits++;
+                    await setUserGameCredits(player.token, player.gameCredits);
+                    sendGameInfo(player);
+                } else if (associatedToken) {
+                    const user = await getUserByToken(associatedToken);
+                    if (user) {
+                        const credits = user.game_credits + 1;
+                        await setUserGameCredits(user.token, credits);
+                        // Inform the client so it can unblock UI (only structured, no chat text)
+                        ws.send(JSON.stringify({ type: 'games-update', credits, cooldown: user.cooldown_until, waitMinutes: 0 }));
+                    }
+                }
                 return;
             }
             if (messageStr === reverse) {
                 // useful for testing
-                if (player.gameCredits > 0) {
-                    player.gameCredits--;
-                    await setUserGameCredits(player.token, player.gameCredits);
+                if (player) {
+                    if (player.gameCredits > 0) {
+                        player.gameCredits--;
+                        await setUserGameCredits(player.token, player.gameCredits);
+                    }
+                    sendGameInfo(player);
+                } else if (associatedToken) {
+                    const user = await getUserByToken(associatedToken);
+                    if (user && user.game_credits > 0) {
+                        const credits = user.game_credits - 1;
+                        await setUserGameCredits(user.token, credits);
+                        ws.send(JSON.stringify({ type: 'games-update', credits, cooldown: user.cooldown_until, waitMinutes: 0 }));
+                    }
                 }
-                sendGameInfo(player);
                 return;
             }
         }
@@ -657,6 +689,7 @@ server.on('connection', (ws: WebSocket) => {
             console.log('Client disconnected');
         }
         multiplayerPlayers.delete(ws);
+        socketTokens.delete(ws);
     });
 });
 
