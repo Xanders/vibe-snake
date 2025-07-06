@@ -407,10 +407,11 @@ function sendGameInfo(player: MultiplayerPlayer): void {
         cooldown: player.cooldownUntil,
         waitMinutes: minutes,
     }));
-    const text = player.gameCredits > 0
-        ? `Games left: ${player.gameCredits}`
-        : `Wait ${minutes} min or buy more games.`;
-    player.ws.send(text);
+    // Only send text message if there are no credits left
+    if (player.gameCredits <= 0) {
+        const text = `Wait ${minutes} min or buy more games.`;
+        player.ws.send(text);
+    }
 }
 
 async function recordMultiplayerScore(): Promise<void> {
@@ -428,6 +429,12 @@ async function recordMultiplayerScore(): Promise<void> {
             await setUserCooldown(p.token, p.cooldownUntil);
         }
         sendGameInfo(p);
+        
+        // Send game-over state to block the game if no credits left
+        if (p.gameCredits <= 0 && p.ws.readyState === WebSocket.OPEN) {
+            const wait = Math.ceil((p.cooldownUntil - Date.now()) / 60000);
+            p.ws.send(JSON.stringify({ type: 'game-over', wait }));
+        }
     }));
     const rows = await getMultiplayerLeaderboard(20);
     mpLeaderboard.length = 0;
@@ -590,7 +597,7 @@ server.on('connection', (ws: WebSocket) => {
                             INVOICE_PAYLOAD,
                             '',
                             'XTR',
-                            [{ label: '10 games', amount: GAME_PRICE * 100 }]
+                            [{ label: '10 games', amount: GAME_PRICE }] // Remove * 100 for Stars
                         );
                         ws.send(JSON.stringify({ type: 'invoice-link', link }));
                     } catch (err) {

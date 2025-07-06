@@ -82,6 +82,8 @@ class Game {
         this.gameOver = false;
         this.lastUpdateTime = 0;
         this.updateInterval = 150; // Controls game speed (milliseconds)
+        this.isBlocked = false; // Add blocked state
+        this.blockMessage = ''; // Message to show when blocked
 
         document.addEventListener('keydown', this.handleKeyPress.bind(this));
         this.gameLoop = this.gameLoop.bind(this);
@@ -152,11 +154,12 @@ class Game {
                 }
             }
         });
-        this.multiToggle.addEventListener('change', () => {
-            this.multiplayerMode = this.multiToggle.checked;
-            if (this.multiplayerMode) {
+        this.multiToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                this.multiplayerMode = true;
                 this.enterMultiplayer();
             } else {
+                this.multiplayerMode = false;
                 this.exitMultiplayer();
             }
         });
@@ -224,10 +227,19 @@ class Game {
                     this.updateCredits(data.credits, data.waitMinutes);
                     return;
                 }
+                if (data.type === 'game-over') {
+                    this.isBlocked = true;
+                    this.blockMessage = `Wait ${data.wait} min or buy more games`;
+                    this.updateCredits(0, data.wait);
+                    return;
+                }
                 if (data.type === 'join-denied') {
                     this.creditInfo.style.display = 'block';
                     this.buyGamesBtn.style.display = 'inline-block';
                     this.creditMessage.textContent = `Please wait ${data.wait} min or buy more games.`;
+                    this.isBlocked = true;
+                    this.blockMessage = `Wait ${data.wait} min or buy more games`;
+                    // Don't exit multiplayer mode, just block the game
                     return;
                 }
                 if (data.type === 'invoice-link') {
@@ -245,8 +257,8 @@ class Game {
                         this.showConnectionError();
                         // Exit multiplayer mode
                         this.exitMultiplayer();
-                        // Disable multiplayer toggle
-                        this.multiToggle.disabled = true;
+                        // Show message instead of disabling
+                        this.multiToggle.parentElement.title = "Unable to connect. Please reload the page.";
                     }
                     return;
                 }
@@ -290,6 +302,13 @@ class Game {
         }, { passive: false });
         this.canvas.addEventListener('touchend', (e) => {
             e.preventDefault();
+            
+            // Skip touch processing if game is blocked
+            if (this.isBlocked) {
+                // Let the buyTouchHandler handle it
+                return;
+            }
+            
             const t = e.changedTouches[0];
             const dx = t.clientX - touchStartX;
             const dy = t.clientY - touchStartY;
@@ -332,6 +351,13 @@ class Game {
         if (this.isPaused || this.gameOver) return;
 
         if (this.multiplayerMode) {
+            // Check if blocked
+            if (this.isBlocked) {
+                this.drawBlocked();
+                requestAnimationFrame(this.gameLoop);
+                return;
+            }
+            
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
             if (this.remoteSnake) {
                 // draw snake
@@ -395,7 +421,7 @@ class Game {
             return;
         }
 
-        if (this.isPaused || this.gameOver) return;
+        if (this.isPaused || this.gameOver || this.isBlocked) return; // Add isBlocked check
         if (this.multiplayerMode) {
             const dirMap = {
                 ArrowUp: 'up',
@@ -414,6 +440,7 @@ class Game {
     }
 
     processDirection(key) {
+        if (this.isBlocked) return; // Add isBlocked check
         if (this.multiplayerMode) {
             const map = {
                 ArrowUp: 'up',
@@ -499,6 +526,66 @@ class Game {
         // which already handles the Space key press for both pause and restart
 
         this.submitScoreIfEligible();
+    }
+
+    drawBlocked() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw semi-transparent overlay
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw blocked message
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+        
+        this.ctx.fillText(this.blockMessage, centerX, centerY - 40);
+        
+        // Draw buy button
+        this.ctx.strokeStyle = '#4CAF50';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(centerX - 80, centerY, 160, 40);
+        
+        this.ctx.fillStyle = '#4CAF50';
+        this.ctx.font = '18px Arial';
+        this.ctx.fillText('Buy 10 Games', centerX, centerY + 20);
+        
+        // Add click handler for the button area
+        if (!this.buyButtonHandler) {
+            this.buyButtonHandler = (e) => {
+                const rect = this.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                // Check if click is on buy button
+                if (x >= centerX - 80 && x <= centerX + 80 && 
+                    y >= centerY && y <= centerY + 40) {
+                    this.buyGames();
+                }
+            };
+            this.canvas.addEventListener('click', this.buyButtonHandler);
+            
+            // Add touch handler for mobile
+            this.buyTouchHandler = (e) => {
+                e.preventDefault();
+                const rect = this.canvas.getBoundingClientRect();
+                const touch = e.changedTouches[0];
+                const x = touch.clientX - rect.left;
+                const y = touch.clientY - rect.top;
+                
+                // Check if touch is on buy button
+                if (x >= centerX - 80 && x <= centerX + 80 && 
+                    y >= centerY && y <= centerY + 40) {
+                    this.buyGames();
+                }
+            };
+            this.canvas.addEventListener('touchend', this.buyTouchHandler, { passive: false });
+        }
     }
 
     reset() {
@@ -610,7 +697,7 @@ class Game {
         document.getElementById('leaderboardContainer').style.display = 'none';
         document.getElementById('mpLeaderboardContainer').style.display = 'block';
         this.onlinePlayersContainer.style.display = 'block';
-        this.updateCredits(0, 0);
+        // Don't hide credit info, it will be updated when we get the data from server
         this.vibeToggle.disabled = true;
         this.berryToggle.disabled = true;
         this.vibeToggle.checked = false;
@@ -655,6 +742,8 @@ class Game {
         this.autopilot = false;
         this.berryToggle.checked = false;
         this.berryMode = false;
+        this.isBlocked = false; // Reset blocked state
+        this.blockMessage = ''; // Clear block message
         if (this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({ type: 'leave-multiplayer' }));
         }
@@ -694,12 +783,18 @@ class Game {
             this.creditInfo.style.display = 'block';
             this.buyGamesBtn.style.display = 'none';
             this.creditMessage.textContent = `Games left: ${credits}`;
+            this.isBlocked = false; // Unblock game when credits are available
         } else if (wait > 0) {
             this.creditInfo.style.display = 'block';
             this.buyGamesBtn.style.display = 'inline-block';
             this.creditMessage.textContent = `Wait ${wait} min or buy more games.`;
+            this.blockMessage = `Wait ${wait} min or buy more games`;
+            if (this.multiplayerMode) {
+                this.isBlocked = true; // Block game when no credits
+            }
         } else {
             this.creditInfo.style.display = 'none';
+            this.isBlocked = false;
         }
     }
 
