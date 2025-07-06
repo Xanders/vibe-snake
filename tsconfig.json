@@ -6,6 +6,12 @@
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
+    "moduleResolution": "node",
+    "types": [
+      "@types/node",
+      "@types/ws",
+      "@types/uuid"
+    ],
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
