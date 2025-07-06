@@ -105,6 +105,8 @@ class Game {
         this.creditMessage = document.getElementById('creditMessage');
         this.buyGamesBtn = document.getElementById('buyGamesBtn');
         this.buyGamesBtn.addEventListener('click', () => this.buyGames());
+        this.isGameBlocked = false;
+        this.blockedMessage = '';
         if (window.Telegram && Telegram.WebApp) {
             Telegram.WebApp.onEvent('invoiceClosed', (status) => {
                 if (status === 'paid') {
@@ -173,18 +175,121 @@ class Game {
             if (this.multiplayerMode) {
                 this.showConnectionError();
                 this.exitMultiplayer();
-                this.multiToggle.disabled = true;
             }
+            // Показываем сообщение об ошибке вместо дизейбла
+            this.showMultiplayerError('Connection failed. Please try again later.');
         };
         this.ws.onclose = () => {
             console.log('WebSocket connection closed');
             if (this.multiplayerMode) {
                 this.showConnectionError(); 
                 this.exitMultiplayer();
-                this.multiToggle.disabled = true;
             }
+            // Показываем сообщение об ошибке вместо дизейбла
+            this.showMultiplayerError('Connection lost. Please try again later.');
         };
         
+        // Setup WebSocket message handlers
+        this.setupWebSocketHandlers();
+
+        // Set up chat event listeners
+        this.chatSend.addEventListener('click', () => this.sendMessage());
+        this.chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.sendMessage();
+            }
+        });
+
+        // Touch controls for mobile
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchMoved = false;
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            touchStartX = t.clientX;
+            touchStartY = t.clientY;
+            touchMoved = false;
+            console.log('touchstart', touchStartX, touchStartY);
+        }, { passive: false });
+        this.canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            // Only mark as moved if the finger travelled far enough
+            if (Math.abs(t.clientX - touchStartX) > 10 || Math.abs(t.clientY - touchStartY) > 10) {
+                touchMoved = true;
+            }
+        }, { passive: false });
+        this.canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            const t = e.changedTouches[0];
+            const dx = t.clientX - touchStartX;
+            const dy = t.clientY - touchStartY;
+            console.log('touchend', { dx, dy, touchMoved });
+            
+            // Проверяем, заблокирована ли игра в мультиплеере
+            if (this.multiplayerMode && this.isGameBlocked) {
+                const rect = this.canvas.getBoundingClientRect();
+                const tapX = t.clientX - rect.left;
+                const tapY = t.clientY - rect.top;
+                
+                // Проверяем попадание в кнопку покупки
+                if (tapX >= this.canvas.width / 2 - 80 && tapX <= this.canvas.width / 2 + 80 &&
+                    tapY >= this.canvas.height / 2 + 20 && tapY <= this.canvas.height / 2 + 60) {
+                    this.buyGames();
+                }
+                return;
+            }
+            
+            if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+                const rect = this.canvas.getBoundingClientRect();
+                const tapX = t.clientX - rect.left;
+                const tapY = t.clientY - rect.top;
+                const diffX = tapX - (this.snake.x + 10);
+                const diffY = tapY - (this.snake.y + 10);
+                const axis = Math.abs(diffX) > Math.abs(diffY) ? 'x' : 'y';
+                console.log('tap', { tapX, tapY, diffX, diffY, axis });
+                if (axis === 'x') {
+                    this.processDirection(diffX > 0 ? 'ArrowRight' : 'ArrowLeft');
+                } else {
+                    this.processDirection(diffY > 0 ? 'ArrowDown' : 'ArrowUp');
+                }
+            } else if (Math.abs(dx) > Math.abs(dy)) {
+                if (dx > 0) this.processDirection('ArrowRight');
+                else this.processDirection('ArrowLeft');
+            } else {
+                if (dy > 0) this.processDirection('ArrowDown');
+                else this.processDirection('ArrowUp');
+            }
+        }, { passive: false });
+
+        // Restart on tap when game over
+        this.canvas.addEventListener('click', (e) => {
+            // Проверяем, заблокирована ли игра в мультиплеере
+            if (this.multiplayerMode && this.isGameBlocked) {
+                const rect = this.canvas.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                
+                // Проверяем попадание в кнопку покупки
+                if (clickX >= this.canvas.width / 2 - 80 && clickX <= this.canvas.width / 2 + 80 &&
+                    clickY >= this.canvas.height / 2 + 20 && clickY <= this.canvas.height / 2 + 60) {
+                    this.buyGames();
+                }
+                return;
+            }
+            
+            if (this.gameOver) this.reset();
+        });
+        this.canvas.addEventListener('touchstart', (e) => {
+            if (this.gameOver) {
+                e.preventDefault();
+                this.reset();
+            }
+        }, { passive: false });
+    }
+
+    setupWebSocketHandlers() {
         // Handle incoming messages from WebSocket
         this.ws.onmessage = (event) => {
             console.log('Received message:', event.data);
@@ -222,12 +327,21 @@ class Game {
                 }
                 if (data.type === 'games-update') {
                     this.updateCredits(data.credits, data.waitMinutes);
+                    // Блокируем игру если нет игр и есть кулдаун
+                    if (data.credits === 0 && data.waitMinutes > 0) {
+                        this.isGameBlocked = true;
+                        this.blockedMessage = `Wait ${data.waitMinutes} min or buy more games`;
+                    } else {
+                        this.isGameBlocked = false;
+                    }
                     return;
                 }
                 if (data.type === 'join-denied') {
                     this.creditInfo.style.display = 'block';
                     this.buyGamesBtn.style.display = 'inline-block';
                     this.creditMessage.textContent = `Please wait ${data.wait} min or buy more games.`;
+                    this.isGameBlocked = true;
+                    this.blockedMessage = `Wait ${data.wait} min or buy more games`;
                     return;
                 }
                 if (data.type === 'invoice-link') {
@@ -245,8 +359,8 @@ class Game {
                         this.showConnectionError();
                         // Exit multiplayer mode
                         this.exitMultiplayer();
-                        // Disable multiplayer toggle
-                        this.multiToggle.disabled = true;
+                        // Показываем сообщение об ошибке вместо дизейбла
+                        this.showMultiplayerError('Authentication failed. Please try again.');
                     }
                     return;
                 }
@@ -259,73 +373,6 @@ class Game {
             this.chatMessages.appendChild(messageElement);
             this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
         };
-
-        // Set up chat event listeners
-        this.chatSend.addEventListener('click', () => this.sendMessage());
-        this.chatInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.sendMessage();
-            }
-        });
-
-        // Touch controls for mobile
-        let touchStartX = 0;
-        let touchStartY = 0;
-        let touchMoved = false;
-        this.canvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            const t = e.touches[0];
-            touchStartX = t.clientX;
-            touchStartY = t.clientY;
-            touchMoved = false;
-            console.log('touchstart', touchStartX, touchStartY);
-        }, { passive: false });
-        this.canvas.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            const t = e.touches[0];
-            // Only mark as moved if the finger travelled far enough
-            if (Math.abs(t.clientX - touchStartX) > 10 || Math.abs(t.clientY - touchStartY) > 10) {
-                touchMoved = true;
-            }
-        }, { passive: false });
-        this.canvas.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            const t = e.changedTouches[0];
-            const dx = t.clientX - touchStartX;
-            const dy = t.clientY - touchStartY;
-            console.log('touchend', { dx, dy, touchMoved });
-            if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-                const rect = this.canvas.getBoundingClientRect();
-                const tapX = t.clientX - rect.left;
-                const tapY = t.clientY - rect.top;
-                const diffX = tapX - (this.snake.x + 10);
-                const diffY = tapY - (this.snake.y + 10);
-                const axis = Math.abs(diffX) > Math.abs(diffY) ? 'x' : 'y';
-                console.log('tap', { tapX, tapY, diffX, diffY, axis });
-                if (axis === 'x') {
-                    this.processDirection(diffX > 0 ? 'ArrowRight' : 'ArrowLeft');
-                } else {
-                    this.processDirection(diffY > 0 ? 'ArrowDown' : 'ArrowUp');
-                }
-            } else if (Math.abs(dx) > Math.abs(dy)) {
-                if (dx > 0) this.processDirection('ArrowRight');
-                else this.processDirection('ArrowLeft');
-            } else {
-                if (dy > 0) this.processDirection('ArrowDown');
-                else this.processDirection('ArrowUp');
-            }
-        }, { passive: false });
-
-        // Restart on tap when game over
-        this.canvas.addEventListener('click', () => {
-            if (this.gameOver) this.reset();
-        });
-        this.canvas.addEventListener('touchstart', (e) => {
-            if (this.gameOver) {
-                e.preventDefault();
-                this.reset();
-            }
-        }, { passive: false });
     }
 
     gameLoop(timestamp) {
@@ -333,6 +380,13 @@ class Game {
 
         if (this.multiplayerMode) {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            // Проверяем, заблокирована ли игра
+            if (this.isGameBlocked) {
+                this.drawGameBlocked();
+                return;
+            }
+            
             if (this.remoteSnake) {
                 // draw snake
                 this.ctx.fillStyle = '#4CAF50';
@@ -607,6 +661,12 @@ class Game {
     }
 
     enterMultiplayer() {
+        // Если WebSocket закрыт, переподключаемся
+        if (this.ws.readyState === WebSocket.CLOSED) {
+            this.reconnectWebSocket();
+            return; // Выходим, подключение произойдет в onopen
+        }
+        
         document.getElementById('leaderboardContainer').style.display = 'none';
         document.getElementById('mpLeaderboardContainer').style.display = 'block';
         this.onlinePlayersContainer.style.display = 'block';
@@ -642,6 +702,80 @@ class Game {
             console.log('Sending join request', payload);
             this.ws.send(JSON.stringify(payload));
         }
+    }
+
+    reconnectWebSocket() {
+        const host = window.location.hostname;
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const url = `${protocol}://${host}:49123`;
+        console.log('Reconnecting to WebSocket:', url);
+        this.ws = new WebSocket(url);
+        this.ws.onopen = () => {
+            console.log('WebSocket reconnected');
+            // Сразу пытаемся подключиться к мультиплееру
+            if (this.multiplayerMode) {
+                // Вызываем enterMultiplayer без проверки состояния WebSocket
+                this.joinMultiplayerAfterReconnect();
+            }
+        };
+        this.ws.onerror = (err) => {
+            console.error('WebSocket error:', err);
+            if (this.multiplayerMode) {
+                this.showConnectionError();
+                this.exitMultiplayer();
+            }
+            // Показываем сообщение об ошибке вместо дизейбла
+            this.showMultiplayerError('Connection failed. Please try again later.');
+        };
+        this.ws.onclose = () => {
+            console.log('WebSocket connection closed');
+            if (this.multiplayerMode) {
+                this.showConnectionError(); 
+                this.exitMultiplayer();
+            }
+            // Показываем сообщение об ошибке вместо дизейбла
+            this.showMultiplayerError('Connection lost. Please try again later.');
+        };
+        
+        // Переустанавливаем обработчики сообщений
+        this.setupWebSocketHandlers();
+    }
+
+    joinMultiplayerAfterReconnect() {
+        document.getElementById('leaderboardContainer').style.display = 'none';
+        document.getElementById('mpLeaderboardContainer').style.display = 'block';
+        this.onlinePlayersContainer.style.display = 'block';
+        this.updateCredits(0, 0);
+        this.vibeToggle.disabled = true;
+        this.berryToggle.disabled = true;
+        this.vibeToggle.checked = false;
+        this.autopilot = false;
+        this.berryToggle.checked = false;
+        this.berryMode = false;
+        this.snake.reset();
+        this.food.move();
+        
+        const payload = { type: 'join-multiplayer' };
+        const stored = localStorage.getItem('playerToken');
+        const hasTg = window.Telegram && window.Telegram.WebApp && Telegram.WebApp.initData;
+        if (stored) {
+            payload.token = stored;
+        }
+        if (hasTg) {
+            payload.tgInitData = Telegram.WebApp.initData;
+        }
+        if (!stored && !hasTg) {
+            const name = prompt('Enter your name:');
+            if (name) {
+                payload.name = name;
+            } else {
+                this.multiToggle.checked = false;
+                this.onlinePlayersContainer.style.display = 'none';
+                return;
+            }
+        }
+        console.log('Sending join request after reconnect', payload);
+        this.ws.send(JSON.stringify(payload));
     }
 
     exitMultiplayer() {
@@ -735,6 +869,55 @@ class Game {
         // Set flags to block interaction
         this.gameOver = true;
         this.multiplayerMode = false;
+    }
+
+    showMultiplayerError(message) {
+        // Clear the canvas
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw semi-transparent overlay
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw error message
+        this.ctx.fillStyle = '#ff4444';
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+        
+        this.ctx.fillText(message, centerX, centerY - 20);
+        
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '18px Arial';
+        this.ctx.fillText('Please try again later.', centerX, centerY + 20);
+        
+        // Set flags to block interaction
+        this.gameOver = true;
+        this.multiplayerMode = false;
+    }
+
+    drawGameBlocked() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Сообщение о блокировке
+        this.ctx.fillStyle = '#ff4444';
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(this.blockedMessage || 'Game Blocked', this.canvas.width / 2, this.canvas.height / 2 - 40);
+        
+        // Кнопка покупки
+        this.ctx.fillStyle = '#4CAF50';
+        this.ctx.fillRect(this.canvas.width / 2 - 80, this.canvas.height / 2 + 20, 160, 40);
+        
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '18px Arial';
+        this.ctx.fillText('Buy Games for ⭐99', this.canvas.width / 2, this.canvas.height / 2 + 40);
     }
 }
 

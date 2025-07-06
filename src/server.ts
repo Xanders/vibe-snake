@@ -407,10 +407,12 @@ function sendGameInfo(player: MultiplayerPlayer): void {
         cooldown: player.cooldownUntil,
         waitMinutes: minutes,
     }));
-    const text = player.gameCredits > 0
-        ? `Games left: ${player.gameCredits}`
-        : `Wait ${minutes} min or buy more games.`;
-    player.ws.send(text);
+    
+    // Отправляем текстовое сообщение только если у игрока нет игр и есть кулдаун
+    if (player.gameCredits === 0 && player.cooldownUntil > Date.now()) {
+        const text = `Wait ${minutes} min or buy more games.`;
+        player.ws.send(text);
+    }
 }
 
 async function recordMultiplayerScore(): Promise<void> {
@@ -590,7 +592,7 @@ server.on('connection', (ws: WebSocket) => {
                             INVOICE_PAYLOAD,
                             '',
                             'XTR',
-                            [{ label: '10 games', amount: GAME_PRICE * 100 }]
+                            [{ label: '10 games', amount: GAME_PRICE }]
                         );
                         ws.send(JSON.stringify({ type: 'invoice-link', link }));
                     } catch (err) {
@@ -621,6 +623,7 @@ server.on('connection', (ws: WebSocket) => {
                 player.gameCredits++;
                 await setUserGameCredits(player.token, player.gameCredits);
                 sendGameInfo(player);
+                ws.send(`🎮 Cheat code activated! You got 1 extra game. Games left: ${player.gameCredits}`);
                 return;
             }
             if (messageStr === reverse) {
@@ -630,6 +633,7 @@ server.on('connection', (ws: WebSocket) => {
                     await setUserGameCredits(player.token, player.gameCredits);
                 }
                 sendGameInfo(player);
+                ws.send(`🔧 Test code activated! Games left: ${player.gameCredits}`);
                 return;
             }
         }
@@ -659,7 +663,7 @@ console.log(`WebSocket server is running on port ${PORT}`);
 
 if (bot) {
 
-    bot.on('message:successful_payment', async ctx => {
+    bot.on('message:successful_payment', async (ctx: any) => {
         const payment = ctx.message.successful_payment;
         if (payment.invoice_payload === INVOICE_PAYLOAD) {
             const tgId = String(ctx.from!.id);
