@@ -1,5 +1,6 @@
 import * as WebSocket from 'ws';
 import { Bot } from 'grammy';
+import type { Context as TelegramContext } from 'grammy';
 import {
     initDB,
     createUser,
@@ -698,7 +699,7 @@ console.log(`WebSocket server is running on port ${PORT}`);
 
 if (bot) {
 
-    bot.on('message:successful_payment', async ctx => {
+    bot.on('message:successful_payment', async (ctx: TelegramContext) => {
         const payment = ctx.message.successful_payment;
         if (payment.invoice_payload === INVOICE_PAYLOAD) {
             const tgId = String(ctx.from!.id);
