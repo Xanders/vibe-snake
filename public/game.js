@@ -105,6 +105,41 @@ class Game {
         this.creditMessage = document.getElementById('creditMessage');
         this.buyGamesBtn = document.getElementById('buyGamesBtn');
         this.buyGamesBtn.addEventListener('click', () => this.buyGames());
+
+        // Setup blocking overlay (initially hidden)
+        this.blocked = false;
+        this.blockOverlay = document.createElement('div');
+        this.blockOverlay.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: ${this.canvas.width}px;
+            height: ${this.canvas.height}px;
+            background: rgba(0,0,0,0.75);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 10;
+        `;
+        this.blockOverlayMessage = document.createElement('p');
+        this.blockOverlayMessage.style.fontSize = '20px';
+        this.blockOverlay.appendChild(this.blockOverlayMessage);
+        this.blockOverlayBuyBtn = document.createElement('button');
+        this.blockOverlayBuyBtn.textContent = 'Buy 10 games (99 ⭐)';
+        this.blockOverlayBuyBtn.style.cssText = 'margin-top:15px;padding:8px 16px;background:#ffd800;border:none;border-radius:4px;cursor:pointer;';
+        this.blockOverlayBuyBtn.addEventListener('click', () => this.buyGames());
+        this.blockOverlay.appendChild(this.blockOverlayBuyBtn);
+        // Place overlay right above the canvas
+        const container = this.canvas.parentElement;
+        if (container) {
+            container.style.position = 'relative';
+            container.appendChild(this.blockOverlay);
+        }
         if (window.Telegram && Telegram.WebApp) {
             Telegram.WebApp.onEvent('invoiceClosed', (status) => {
                 if (status === 'paid') {
@@ -173,7 +208,6 @@ class Game {
             if (this.multiplayerMode) {
                 this.showConnectionError();
                 this.exitMultiplayer();
-                this.multiToggle.disabled = true;
             }
         };
         this.ws.onclose = () => {
@@ -181,7 +215,6 @@ class Game {
             if (this.multiplayerMode) {
                 this.showConnectionError(); 
                 this.exitMultiplayer();
-                this.multiToggle.disabled = true;
             }
         };
         
@@ -225,9 +258,11 @@ class Game {
                     return;
                 }
                 if (data.type === 'join-denied') {
-                    this.creditInfo.style.display = 'block';
-                    this.buyGamesBtn.style.display = 'inline-block';
-                    this.creditMessage.textContent = `Please wait ${data.wait} min or buy more games.`;
+                    // Revert toggle and multiplayer state
+                    this.multiplayerMode = false;
+                    this.multiToggle.checked = false;
+                    // Show blocking overlay
+                    this.updateCredits(0, data.wait);
                     return;
                 }
                 if (data.type === 'invoice-link') {
@@ -329,7 +364,7 @@ class Game {
     }
 
     gameLoop(timestamp) {
-        if (this.isPaused || this.gameOver) return;
+        if (this.isPaused || this.gameOver || this.blocked) return;
 
         if (this.multiplayerMode) {
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -395,7 +430,7 @@ class Game {
             return;
         }
 
-        if (this.isPaused || this.gameOver) return;
+        if (this.isPaused || this.gameOver || this.blocked) return;
         if (this.multiplayerMode) {
             const dirMap = {
                 ArrowUp: 'up',
@@ -409,7 +444,7 @@ class Game {
             }
             return;
         }
-        if (this.isPaused || this.gameOver) return;
+        if (this.isPaused || this.gameOver || this.blocked) return;
         this.processDirection(event.key);
     }
 
@@ -426,6 +461,9 @@ class Game {
                 this.ws.send(JSON.stringify({ type: 'move', dir: d }));
             }
             return;
+        }
+        if (this.blocked) {
+            return; // Ignore manual moves while blocked
         }
         if (this.autopilot && this.berryMode) {
             switch (key) {
@@ -690,16 +728,30 @@ class Game {
     }
 
     updateCredits(credits, wait) {
+        // Hide old bottom credit banner entirely – we'll use canvas overlay instead
+        this.creditInfo.style.display = 'none';
+
         if (credits > 0) {
-            this.creditInfo.style.display = 'block';
-            this.buyGamesBtn.style.display = 'none';
-            this.creditMessage.textContent = `Games left: ${credits}`;
+            // Unblock the game
+            this.blockOverlay.style.display = 'none';
+            this.blocked = false;
+            this.isPaused = false;
+            if (this.multiplayerMode) {
+                requestAnimationFrame(this.gameLoop);
+            }
         } else if (wait > 0) {
-            this.creditInfo.style.display = 'block';
-            this.buyGamesBtn.style.display = 'inline-block';
-            this.creditMessage.textContent = `Wait ${wait} min or buy more games.`;
+            // Show blocking overlay with message and allow purchase
+            this.blocked = true;
+            this.isPaused = true;
+            this.blockOverlayMessage.textContent = `Wait ${wait} min or buy more games.`;
+            // Keep overlay size in sync with canvas position (responsive)
+            const rect = this.canvas.getBoundingClientRect();
+            this.blockOverlay.style.width = `${rect.width}px`;
+            this.blockOverlay.style.height = `${rect.height}px`;
+            this.blockOverlay.style.display = 'flex';
         } else {
-            this.creditInfo.style.display = 'none';
+            this.blockOverlay.style.display = 'none';
+            this.blocked = false;
         }
     }
 
@@ -732,7 +784,7 @@ class Game {
         this.ctx.font = '18px Arial';
         this.ctx.fillText('Please contact developers', centerX, centerY + 20);
         
-        // Set flags to block interaction
+        // Block interaction but do NOT disable the multiplayer toggle – user may retry.
         this.gameOver = true;
         this.multiplayerMode = false;
     }

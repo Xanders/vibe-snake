@@ -401,16 +401,22 @@ function sendGameInfo(player: MultiplayerPlayer): void {
     if (player.ws.readyState !== WebSocket.OPEN) return;
     const timeLeft = player.gameCredits > 0 ? 0 : Math.max(0, player.cooldownUntil - Date.now());
     const minutes = Math.ceil(timeLeft / 60000);
+
+    // Always send a structured update that the client can handle.
     player.ws.send(JSON.stringify({
         type: 'games-update',
         credits: player.gameCredits,
         cooldown: player.cooldownUntil,
         waitMinutes: minutes,
     }));
-    const text = player.gameCredits > 0
-        ? `Games left: ${player.gameCredits}`
-        : `Wait ${minutes} min or buy more games.`;
-    player.ws.send(text);
+
+    // Only forward a human-readable chat message when there is a real cooldown.
+    // This prevents confusing "Wait 0 min" notifications on the very first join.
+    if (player.gameCredits === 0 && minutes > 0) {
+        player.ws.send(`Wait ${minutes} min or buy more games.`);
+    } else if (player.gameCredits > 0) {
+        player.ws.send(`Games left: ${player.gameCredits}`);
+    }
 }
 
 async function recordMultiplayerScore(): Promise<void> {
@@ -590,7 +596,7 @@ server.on('connection', (ws: WebSocket) => {
                             INVOICE_PAYLOAD,
                             '',
                             'XTR',
-                            [{ label: '10 games', amount: GAME_PRICE * 100 }]
+                            [{ label: '10 games', amount: GAME_PRICE }]
                         );
                         ws.send(JSON.stringify({ type: 'invoice-link', link }));
                     } catch (err) {
