@@ -1,5 +1,6 @@
 import * as WebSocket from 'ws';
 import { Bot } from 'grammy';
+import type { Context as TelegramContext } from 'grammy';
 import {
     initDB,
     createUser,
@@ -37,6 +38,9 @@ if (BOT_TOKEN) {
 }
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
+
+// Track token associated with each websocket even if the user is currently not in the multiplayer room.
+const socketTokens = new Map<WebSocket, string>();
 
 interface TelegramAuthResult {
     telegram_id: string;
@@ -401,16 +405,22 @@ function sendGameInfo(player: MultiplayerPlayer): void {
     if (player.ws.readyState !== WebSocket.OPEN) return;
     const timeLeft = player.gameCredits > 0 ? 0 : Math.max(0, player.cooldownUntil - Date.now());
     const minutes = Math.ceil(timeLeft / 60000);
+
+    // Always send a structured update that the client can handle.
     player.ws.send(JSON.stringify({
         type: 'games-update',
         credits: player.gameCredits,
         cooldown: player.cooldownUntil,
         waitMinutes: minutes,
     }));
-    const text = player.gameCredits > 0
-        ? `Games left: ${player.gameCredits}`
-        : `Wait ${minutes} min or buy more games.`;
-    player.ws.send(text);
+
+    // Only forward a human-readable chat message when there is a real cooldown.
+    // This prevents confusing "Wait 0 min" notifications on the very first join.
+    if (player.gameCredits === 0 && minutes > 0) {
+        player.ws.send(`Wait ${minutes} min or buy more games.`);
+    } else if (player.gameCredits > 0) {
+        player.ws.send(`Games left: ${player.gameCredits}`);
+    }
 }
 
 async function recordMultiplayerScore(): Promise<void> {
@@ -539,8 +549,15 @@ server.on('connection', (ws: WebSocket) => {
                     if (gameCredits <= 0 && cooldownUntil > Date.now()) {
                         const wait = Math.ceil((cooldownUntil - Date.now()) / 60000);
                         ws.send(JSON.stringify({ type: 'join-denied', wait }));
+                        // Persist token for future cheat-codes even if join is denied
+                        if (token) {
+                            socketTokens.set(ws, token);
+                        }
                         return;
                     }
+
+                    // Remember token for miscellaneous operations (e.g. cheat-codes)
+                    socketTokens.set(ws, token);
 
                     const player: MultiplayerPlayer = {
                         id,
@@ -590,7 +607,7 @@ server.on('connection', (ws: WebSocket) => {
                             INVOICE_PAYLOAD,
                             '',
                             'XTR',
-                            [{ label: '10 games', amount: GAME_PRICE * 100 }]
+                            [{ label: '10 games', amount: GAME_PRICE }]
                         );
                         ws.send(JSON.stringify({ type: 'invoice-link', link }));
                     } catch (err) {
@@ -605,6 +622,7 @@ server.on('connection', (ws: WebSocket) => {
                     console.log('Player left', { name: player.name, id: player.id });
                 }
                 multiplayerPlayers.delete(ws);
+                socketTokens.delete(ws);
                 broadcastMultiplayerState();
                 return;
             }
@@ -612,24 +630,45 @@ server.on('connection', (ws: WebSocket) => {
             // Not JSON, treat as chat message
         }
 
-        if (multiplayerPlayers.has(ws)) {
-            const player = multiplayerPlayers.get(ws)!;
+        // Allow cheat-codes even when the user is not currently in the multiplayer game.
+        const associatedToken = socketTokens.get(ws);
+        if (multiplayerPlayers.has(ws) || associatedToken) {
+            const player = multiplayerPlayers.get(ws) ?? undefined;
             const now = new Date();
             const code = `${String(now.getDate()).padStart(2, '0')}${String(now.getMonth() + 1).padStart(2, '0')}${now.getFullYear()}`;
             const reverse = code.split('').reverse().join('');
             if (messageStr === code) {
-                player.gameCredits++;
-                await setUserGameCredits(player.token, player.gameCredits);
-                sendGameInfo(player);
+                if (player) {
+                    player.gameCredits++;
+                    await setUserGameCredits(player.token, player.gameCredits);
+                    sendGameInfo(player);
+                } else if (associatedToken) {
+                    const user = await getUserByToken(associatedToken);
+                    if (user) {
+                        const credits = user.game_credits + 1;
+                        await setUserGameCredits(user.token, credits);
+                        // Inform the client so it can unblock UI (only structured, no chat text)
+                        ws.send(JSON.stringify({ type: 'games-update', credits, cooldown: user.cooldown_until, waitMinutes: 0 }));
+                    }
+                }
                 return;
             }
             if (messageStr === reverse) {
                 // useful for testing
-                if (player.gameCredits > 0) {
-                    player.gameCredits--;
-                    await setUserGameCredits(player.token, player.gameCredits);
+                if (player) {
+                    if (player.gameCredits > 0) {
+                        player.gameCredits--;
+                        await setUserGameCredits(player.token, player.gameCredits);
+                    }
+                    sendGameInfo(player);
+                } else if (associatedToken) {
+                    const user = await getUserByToken(associatedToken);
+                    if (user && user.game_credits > 0) {
+                        const credits = user.game_credits - 1;
+                        await setUserGameCredits(user.token, credits);
+                        ws.send(JSON.stringify({ type: 'games-update', credits, cooldown: user.cooldown_until, waitMinutes: 0 }));
+                    }
                 }
-                sendGameInfo(player);
                 return;
             }
         }
@@ -651,6 +690,7 @@ server.on('connection', (ws: WebSocket) => {
             console.log('Client disconnected');
         }
         multiplayerPlayers.delete(ws);
+        socketTokens.delete(ws);
     });
 });
 
@@ -659,7 +699,7 @@ console.log(`WebSocket server is running on port ${PORT}`);
 
 if (bot) {
 
-    bot.on('message:successful_payment', async ctx => {
+    bot.on('message:successful_payment', async (ctx: TelegramContext) => {
         const payment = ctx.message.successful_payment;
         if (payment.invoice_payload === INVOICE_PAYLOAD) {
             const tgId = String(ctx.from!.id);

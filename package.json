@@ -8,8 +8,10 @@
     "start": "npm run build && concurrently \"node dist/server.js\" \"node static-server.js\""
   },
   "devDependencies": {
+    "@types/node": "^20.19.4",
     "@types/sqlite3": "^3.1.11",
-    "@types/ws": "^8.5.14",
+    "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.18.1",
     "concurrently": "^8.2.2",
     "typescript": "^5.7.3"
   },
