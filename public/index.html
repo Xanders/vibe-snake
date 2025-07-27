@@ -38,6 +38,11 @@
             margin: 5px 0;
             color: #666;
         }
+        #switchContainer {
+            margin-top: 20px;
+            display: flex;
+            gap: 20px;
+        }
         .toggle-container {
             display: flex;
             align-items: center;
@@ -173,6 +178,29 @@
     </style>
 </head>
 <body>
+    <div id="switchContainer">
+        <div class="toggle-container">
+            <span>Vibe Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="vibeModeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="toggle-container" id="berryToggleContainer" style="display:none;">
+            <span>Berry Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="berryModeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="toggle-container" id="multiToggleContainer" style="display:none;">
+            <span>Multiplayer</span>
+            <label class="switch">
+                <input type="checkbox" id="multiplayerModeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
     <div class="game-info">
         Score: <span id="score">0</span>
     </div>
@@ -197,27 +225,6 @@
     <div class="controls">
         <p>Use arrow keys, swipe, or tap to control the snake</p>
         <p>Press Space or tap the field to restart</p>
-        <div class="toggle-container">
-            <span>Vibe Mode</span>
-            <label class="switch">
-                <input type="checkbox" id="vibeModeToggle">
-                <span class="slider"></span>
-            </label>
-        </div>
-        <div class="toggle-container" id="berryToggleContainer" style="display:none;">
-            <span>Berry Mode</span>
-            <label class="switch">
-                <input type="checkbox" id="berryModeToggle">
-                <span class="slider"></span>
-            </label>
-        </div>
-        <div class="toggle-container" id="multiToggleContainer" style="display:none;">
-            <span>Multiplayer</span>
-            <label class="switch">
-                <input type="checkbox" id="multiplayerModeToggle">
-                <span class="slider"></span>
-            </label>
-        </div>
     </div>
     <div id="leaderboardContainer" class="leaderboard-container">
         <h3>Berry Mode Leaderboard</h3>

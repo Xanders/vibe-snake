@@ -426,23 +426,39 @@ function sendGameInfo(player: MultiplayerPlayer): void {
 async function recordMultiplayerScore(): Promise<void> {
     if (multiplayerPlayers.size === 0) return;
     const players = Array.from(multiplayerPlayers.values());
-    const names = players.map(p => p.name).join(', ');
-    const ids = players.map(p => p.id).join(',');
-    await addMultiplayerScore(ids, names, score);
+
+    const active: MultiplayerPlayer[] = [];
+
     await Promise.all(players.map(async p => {
         if (p.gameCredits > 0) {
             p.gameCredits--;
             await setUserGameCredits(p.token, p.gameCredits);
-        } else {
-            p.cooldownUntil = Date.now() + 60 * 60 * 1000;
-            await setUserCooldown(p.token, p.cooldownUntil);
         }
+
+        if (p.gameCredits <= 0) {
+            if (p.cooldownUntil <= Date.now()) {
+                p.cooldownUntil = Date.now() + 60 * 60 * 1000;
+                await setUserCooldown(p.token, p.cooldownUntil);
+            }
+            multiplayerPlayers.delete(p.ws);
+        } else {
+            active.push(p);
+        }
+
         sendGameInfo(p);
     }));
-    const rows = await getMultiplayerLeaderboard(20);
-    mpLeaderboard.length = 0;
-    mpLeaderboard.push(...rows);
-    sendMpLeaderboard();
+
+    if (active.length > 0) {
+        const names = active.map(p => p.name).join(', ');
+        const ids = active.map(p => p.id).join(',');
+        await addMultiplayerScore(ids, names, score);
+        const rows = await getMultiplayerLeaderboard(20);
+        mpLeaderboard.length = 0;
+        mpLeaderboard.push(...rows);
+        sendMpLeaderboard();
+    }
+
+    broadcastMultiplayerState();
 }
 
 function updateLeaderboard(name: string, score: number): void {
