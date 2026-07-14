@@ -199,7 +199,12 @@ class Game {
         // Initialize WebSocket connection
         const host = window.location.hostname;
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const url = `${protocol}://${host}:49123`;
+        const isLocalDevelopment =
+            (host === 'localhost' || host === '127.0.0.1') &&
+            window.location.port === '8080';
+        const url = isLocalDevelopment
+            ? `${protocol}://${host}:49123`
+            : `${protocol}://${window.location.host}/ws`;
         console.log('Connecting to WebSocket:', url);
         this.ws = new WebSocket(url);
         this.ws.onopen = () => console.log('WebSocket connection opened');

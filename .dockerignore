@@ -1,0 +1,7 @@
+.git
+.github
+db
+node_modules
+npm-debug.log*
+public
+screenshot.png

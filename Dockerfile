@@ -6,9 +6,8 @@ COPY package*.json ./
 COPY tsconfig.json ./
 COPY src ./src
 
-RUN npm install
-RUN npm install typescript -g
-RUN tsc
+RUN npm ci
+RUN npm run build
 
 EXPOSE 49123
 
