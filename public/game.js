@@ -83,7 +83,11 @@ class Game {
         this.lastUpdateTime = 0;
         this.updateInterval = 150; // Controls game speed (milliseconds)
 
-        document.addEventListener('keydown', this.handleKeyPress.bind(this));
+        this.boundKeyPress = this.handleKeyPress.bind(this);
+        window.addEventListener('keydown', this.boundKeyPress, {
+            capture: true,
+            passive: false
+        });
         this.gameLoop = this.gameLoop.bind(this);
         requestAnimationFrame(this.gameLoop);
 

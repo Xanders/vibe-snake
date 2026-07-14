@@ -53,3 +53,22 @@ test('game keys suppress browser scrolling without hijacking chat input', () => 
     );
     assert.equal(chatKeyPrevented, false);
 });
+
+test('keyboard controls are captured before the browser scroll handler', () => {
+    const source = fs.readFileSync(path.join(root, 'public', 'game.js'), 'utf8');
+
+    assert.match(
+        source,
+        /window\.addEventListener\(\s*'keydown',[\s\S]*?capture:\s*true[\s\S]*?passive:\s*false/
+    );
+});
+
+test('the page cache-busts game code and declares generated favicons', () => {
+    const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+
+    assert.match(html, /<script src="game\.js\?v=[^"]+"><\/script>/);
+    assert.match(html, /<link rel="icon" href="favicon\.ico" sizes="any">/);
+    assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="favicon-32x32\.png">/);
+    assert.ok(fs.existsSync(path.join(root, 'public', 'favicon.ico')));
+    assert.ok(fs.existsSync(path.join(root, 'public', 'favicon-32x32.png')));
+});
