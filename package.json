@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "build": "tsc",
+    "test": "node --test",
     "start": "npm run build && concurrently \"node dist/server.js\" \"node static-server.js\""
   },
   "devDependencies": {

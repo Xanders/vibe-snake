@@ -423,6 +423,23 @@ class Game {
     }
 
     handleKeyPress(event) {
+        const target = event.target;
+        const tagName = target && target.tagName;
+        const isTypingTarget = target && (
+            target.isContentEditable ||
+            tagName === 'TEXTAREA' ||
+            tagName === 'SELECT' ||
+            (tagName === 'INPUT' && target.type !== 'checkbox')
+        );
+        if (isTypingTarget) return;
+
+        const isGameControlKey =
+            event.code === 'Space' ||
+            ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key);
+        if (isGameControlKey) {
+            event.preventDefault();
+        }
+
         if (event.code === 'Space') {
             if (this.gameOver) {
                 this.reset();
