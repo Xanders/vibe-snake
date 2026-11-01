@@ -27,7 +27,7 @@ export class TelegramPoller<TUpdate extends TelegramUpdate> {
     private running = false;
     private initialized = false;
     private lastCompletedUpdateId = 0;
-    private terminalError: unknown = null;
+    private hasCompletedUpdate = false;
 
     constructor(
         private readonly bot: TelegramPollingBot<TUpdate>,
@@ -39,10 +39,7 @@ export class TelegramPoller<TUpdate extends TelegramUpdate> {
 
         this.running = true;
         this.controller = new AbortController();
-        this.startPromise = this.run(this.controller.signal).catch(error => {
-            this.terminalError = error;
-            throw error;
-        }).finally(() => {
+        this.startPromise = this.run(this.controller.signal).finally(() => {
             this.running = false;
         });
         return this.startPromise;
@@ -53,23 +50,41 @@ export class TelegramPoller<TUpdate extends TelegramUpdate> {
 
         this.running = false;
         this.controller?.abort();
-        await this.startPromise;
-
-        if (this.terminalError || !this.initialized) return;
-        const confirmationController = new AbortController();
-        const confirmationTimer = setTimeout(
-            () => confirmationController.abort(),
-            this.confirmationTimeoutMs,
-        );
+        let startError: unknown = null;
         try {
-            await this.bot.api.getUpdates({
-                offset: this.lastCompletedUpdateId + 1,
-                limit: 1,
-                timeout: 0,
-            }, confirmationController.signal);
-        } finally {
-            clearTimeout(confirmationTimer);
+            await this.startPromise;
+        } catch (error) {
+            startError = error;
         }
+
+        let confirmationError: unknown = null;
+        if (this.initialized && this.hasCompletedUpdate) {
+            const confirmationController = new AbortController();
+            const confirmationTimer = setTimeout(
+                () => confirmationController.abort(),
+                this.confirmationTimeoutMs,
+            );
+            try {
+                await this.bot.api.getUpdates({
+                    offset: this.lastCompletedUpdateId + 1,
+                    limit: 1,
+                    timeout: 0,
+                }, confirmationController.signal);
+            } catch (error) {
+                confirmationError = error;
+            } finally {
+                clearTimeout(confirmationTimer);
+            }
+        }
+
+        if (startError && confirmationError) {
+            throw new AggregateError(
+                [startError, confirmationError],
+                'Telegram polling and final acknowledgement both failed',
+            );
+        }
+        if (startError) throw startError;
+        if (confirmationError) throw confirmationError;
     }
 
     private async run(signal: AbortSignal): Promise<void> {
@@ -100,6 +115,7 @@ export class TelegramPoller<TUpdate extends TelegramUpdate> {
                     if (!this.running) return;
                     await this.bot.handleUpdate(update);
                     this.lastCompletedUpdateId = update.update_id;
+                    this.hasCompletedUpdate = true;
                 }
             }
         } catch (error) {

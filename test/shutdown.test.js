@@ -409,6 +409,36 @@ test('Telegram does not confirm a payment update whose write failed', async () =
     await assert.rejects(poller.stop(), /payment write failed/);
 });
 
+test('Telegram confirms an earlier successful payment before propagating a later batch failure', async () => {
+    const calls = [];
+    const bot = {
+        init: async () => {},
+        handleUpdate: async update => {
+            calls.push(`handle-${update.update_id}`);
+            if (update.update_id === 42) throw new Error('payment 42 write failed');
+        },
+        api: {
+            deleteWebhook: async () => {},
+            getUpdates: async (options) => {
+                calls.push(`get-${options.offset}-${options.timeout}`);
+                if (options.timeout !== 0) return [{ update_id: 41 }, { update_id: 42 }];
+                return [];
+            },
+        },
+    };
+
+    const poller = new TelegramPoller(bot);
+    await assert.rejects(poller.start(), /payment 42 write failed/);
+    await assert.rejects(poller.stop(), /payment 42 write failed/);
+
+    assert.deepEqual(calls, [
+        'get-1-30',
+        'handle-41',
+        'handle-42',
+        'get-42-0',
+    ]);
+});
+
 test('Telegram initialization can be aborted without starting polling or hanging shutdown', async () => {
     let initSignal;
     let initAttempts = 0;
