@@ -18,6 +18,8 @@ import {
     closeDB,
 } from './db';
 import { ShutdownCoordinator, ShutdownInProgressError } from './shutdown';
+import { TelegramPoller } from './telegram-poller';
+import { dispatchJsonMessage } from './json-message';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 
@@ -35,6 +37,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const INVOICE_PAYLOAD = 'buy10games';
 const GAME_PRICE = 99; // Stars
 let bot: Bot | null = null;
+let botPoller: TelegramPoller<any> | null = null;
 if (BOT_TOKEN) {
     bot = new Bot(BOT_TOKEN);
 }
@@ -503,8 +506,8 @@ server.on('connection', (ws: WebSocket) => {
     ws.on('message', (message: WebSocket.RawData) => {
         void lifecycle.track('websocket-message', async () => {
         const messageStr = message.toString();
-        try {
-            const data = JSON.parse(messageStr);
+        const handledAsJson = await dispatchJsonMessage(messageStr, async data => {
+        if (data !== undefined && data !== null) {
             if (data.type === 'submit-score' && typeof data.name === 'string' && typeof data.score === 'number') {
                 updateLeaderboard(data.name, data.score);
                 sendLeaderboard();
@@ -665,9 +668,9 @@ server.on('connection', (ws: WebSocket) => {
                 broadcastMultiplayerState();
                 return;
             }
-        } catch (err) {
-            // Not JSON, treat as chat message
         }
+        });
+        if (handledAsJson) return;
 
         // Allow cheat-codes even when the user is not currently in the multiplayer game.
         const associatedToken = socketTokens.get(ws);
@@ -740,29 +743,26 @@ console.log(`WebSocket server is running on port ${PORT}`);
 if (bot) {
 
     bot.on('message:successful_payment', async (ctx: TelegramContext) => {
-        try {
-            await lifecycle.track('telegram-payment', async () => {
-                const payment = ctx.message.successful_payment;
-                if (payment.invoice_payload === INVOICE_PAYLOAD) {
-                    const tgId = String(ctx.from!.id);
-                    const user = await getUserByTelegramId(tgId);
-                    if (user) {
-                        const credits = user.game_credits + 10;
-                        await setUserGameCredits(user.token, credits);
-                        const player = Array.from(multiplayerPlayers.values()).find(p => p.token === user.token);
-                        if (player) {
-                            player.gameCredits = credits;
-                            sendGameInfo(player);
-                        }
+        await lifecycle.track('telegram-payment', async () => {
+            const payment = ctx.message.successful_payment;
+            if (payment.invoice_payload === INVOICE_PAYLOAD) {
+                const tgId = String(ctx.from!.id);
+                const user = await getUserByTelegramId(tgId);
+                if (user) {
+                    const credits = user.game_credits + 10;
+                    await setUserGameCredits(user.token, credits);
+                    const player = Array.from(multiplayerPlayers.values()).find(p => p.token === user.token);
+                    if (player) {
+                        player.gameCredits = credits;
+                        sendGameInfo(player);
                     }
                 }
-            });
-        } catch (error) {
-            reportTrackedError(error);
-        }
+            }
+        });
     });
 
-    botStartPromise = bot.start();
+    botPoller = new TelegramPoller(bot);
+    botStartPromise = botPoller.start();
     void botStartPromise.catch(error => {
         if (!lifecycle.isShuttingDown) console.error('Telegram bot failed', error);
     });
@@ -786,9 +786,8 @@ function stopProducers(): void {
 }
 
 async function stopBotPolling(): Promise<void> {
-    if (!bot) return;
-    if (bot.isRunning()) await bot.stop();
-    if (botStartPromise) await botStartPromise;
+    if (!botPoller) return;
+    await botPoller.stop();
 }
 
 function closeWebSockets(): Promise<void> {

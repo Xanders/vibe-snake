@@ -7,6 +7,8 @@ const {
     ShutdownCoordinator,
     ShutdownInProgressError,
 } = require('../dist/shutdown.js');
+const { TelegramPoller } = require('../dist/telegram-poller.js');
+const { dispatchJsonMessage } = require('../dist/json-message.js');
 
 function deferred() {
     let resolve;
@@ -184,7 +186,127 @@ test('server wires score, joins, payments and repeated signals through the lifec
     assert.match(source, /lifecycle\.track\('multiplayer-score',\s*recordMultiplayerScore\)/);
     assert.match(source, /lifecycle\.track\('websocket-message',\s*async\s*\(\)\s*=>/);
     assert.match(source, /lifecycle\.track\('telegram-payment',\s*async\s*\(\)\s*=>/);
+    const paymentHandler = source.slice(
+        source.indexOf("bot.on('message:successful_payment'"),
+        source.indexOf('botPoller = new TelegramPoller(bot)'),
+    );
+    assert.doesNotMatch(paymentHandler, /catch\s*\(/);
+    assert.match(source, /botPoller\s*=\s*new TelegramPoller\(bot\)/);
+    assert.match(source, /await dispatchJsonMessage\(messageStr,\s*async data =>/);
     assert.match(source, /if\s*\(lifecycle\.isShuttingDown\)\s*{\s*ws\.close\(1012/);
     assert.match(source, /process\.on\('SIGTERM',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGTERM'\)\)/);
     assert.match(source, /process\.on\('SIGINT',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGINT'\)\)/);
+});
+
+test('a structured join write rejection propagates instead of becoming chat', async () => {
+    let chatFallback = false;
+    const writeError = new Error('create user failed');
+
+    await assert.rejects(
+        dispatchJsonMessage('{"type":"join-multiplayer","name":"Ada"}', async data => {
+            assert.equal(data.type, 'join-multiplayer');
+            throw writeError;
+        }).then(isJson => {
+            if (!isJson) chatFallback = true;
+        }),
+        writeError,
+    );
+    assert.equal(chatFallback, false);
+});
+
+test('Telegram shutdown waits for a successful payment write before confirming its update', async () => {
+    const write = deferred();
+    const handlerStarted = deferred();
+    const calls = [];
+    let pollCount = 0;
+    const bot = {
+        init: async () => calls.push('init'),
+        handleUpdate: async update => {
+            calls.push(`handle-${update.update_id}`);
+            handlerStarted.resolve();
+            await write.promise;
+            calls.push(`written-${update.update_id}`);
+        },
+        api: {
+            deleteWebhook: async () => calls.push('delete-webhook'),
+            getUpdates: async (options, signal) => {
+                calls.push(`get-${options.offset}-${signal ? 'poll' : 'confirm'}`);
+                if (signal && pollCount++ === 0) return [{ update_id: 41 }];
+                if (signal) return new Promise((resolve, reject) => {
+                    signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+                });
+                return [];
+            },
+        },
+    };
+
+    const poller = new TelegramPoller(bot);
+    const running = poller.start();
+    await handlerStarted.promise;
+    const stopping = poller.stop();
+    await Promise.resolve();
+    assert.equal(calls.includes('get-42-confirm'), false);
+
+    write.resolve();
+    await stopping;
+    await running;
+    assert.ok(calls.indexOf('written-41') < calls.indexOf('get-42-confirm'));
+});
+
+test('Telegram does not confirm a payment update whose write failed', async () => {
+    const bot = {
+        init: async () => {},
+        handleUpdate: async () => { throw new Error('payment write failed'); },
+        api: {
+            deleteWebhook: async () => {},
+            getUpdates: async (options, signal) => {
+                if (signal) return [{ update_id: 51 }];
+                throw new Error(`unexpected confirmation at ${options.offset}`);
+            },
+        },
+    };
+
+    const poller = new TelegramPoller(bot);
+    await assert.rejects(poller.start(), /payment write failed/);
+    await assert.rejects(poller.stop(), /payment write failed/);
+});
+
+test('Telegram initialization can be aborted without starting polling or hanging shutdown', async () => {
+    let initSignal;
+    let initAttempts = 0;
+    let deleteWebhookCalled = false;
+    const initStarted = deferred();
+    const bot = {
+        init: signal => {
+            initSignal = signal;
+            return new Promise((resolve, reject) => {
+                let timer;
+                const retry = () => {
+                    initAttempts++;
+                    if (initAttempts === 2) initStarted.resolve();
+                    timer = setTimeout(retry, 1);
+                };
+                signal.addEventListener('abort', () => {
+                    clearTimeout(timer);
+                    reject(new Error('aborted'));
+                }, { once: true });
+                retry();
+            });
+        },
+        handleUpdate: async () => {},
+        api: {
+            deleteWebhook: async () => { deleteWebhookCalled = true; },
+            getUpdates: async () => [],
+        },
+    };
+
+    const poller = new TelegramPoller(bot);
+    const running = poller.start();
+    await initStarted.promise;
+    await poller.stop();
+    await running;
+
+    assert.equal(initSignal.aborted, true);
+    assert.ok(initAttempts >= 2);
+    assert.equal(deleteWebhookCalled, false);
 });
