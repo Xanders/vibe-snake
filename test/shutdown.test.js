@@ -14,6 +14,7 @@ const {
 } = require('../dist/shutdown.js');
 const { TelegramPoller } = require('../dist/telegram-poller.js');
 const { dispatchJsonMessage } = require('../dist/json-message.js');
+const { respondUpgradeRequired } = require('../dist/http-server.js');
 
 function deferred() {
     let resolve;
@@ -204,6 +205,7 @@ test('server wires score, joins, payments and repeated signals through the lifec
     assert.match(source, /invoiceControllers\.add\(controller\)[\s\S]*?createInvoiceLink\([\s\S]*?controller\.signal/);
     assert.match(source, /abortAndClear\(invoiceControllers\)/);
     assert.match(source, /new WebSocket\.Server\(\{ server: httpServer \}\)/);
+    assert.match(source, /http\.createServer\(\(_request, response\) =>\s*{\s*respondUpgradeRequired\(response\)/);
     assert.match(source, /httpServer\.on\('connection',[\s\S]*?rawSockets\.add\(socket\)/);
     assert.match(source, /destroyAndClearTransports\(rawSockets\)/);
     assert.match(source, /process\.on\('SIGTERM',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGTERM'\)\)/);
@@ -340,6 +342,26 @@ test('the transport deadline destroys a partial pre-upgrade HTTP socket', () => 
 
     assert.equal(partialHandshake.destroyed, true);
     assert.equal(rawSockets.size, 0);
+});
+
+test('a non-upgrade HTTP request receives the original completed 426 response', () => {
+    const result = { status: 0, headers: null, body: null };
+    const response = {
+        writeHead(status, headers) {
+            result.status = status;
+            result.headers = headers;
+        },
+        end(body) { result.body = body; },
+    };
+
+    respondUpgradeRequired(response);
+
+    assert.equal(result.status, 426);
+    assert.equal(result.body, 'Upgrade Required');
+    assert.deepEqual(result.headers, {
+        'Content-Length': 16,
+        'Content-Type': 'text/plain',
+    });
 });
 
 test('Telegram shutdown waits for a successful payment write before confirming its update', async () => {

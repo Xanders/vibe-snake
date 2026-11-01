@@ -30,6 +30,7 @@ import {
 } from './shutdown';
 import { TelegramPoller } from './telegram-poller';
 import { dispatchJsonMessage } from './json-message';
+import { respondUpgradeRequired } from './http-server';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 
@@ -51,7 +52,9 @@ let botPoller: TelegramPoller<any> | null = null;
 if (BOT_TOKEN) {
     bot = new Bot(BOT_TOKEN);
 }
-const httpServer = http.createServer();
+const httpServer = http.createServer((_request, response) => {
+    respondUpgradeRequired(response);
+});
 const server = new WebSocket.Server({ server: httpServer });
 const clients: Set<WebSocket> = new Set();
 const rawSockets = new Set<net.Socket>();
