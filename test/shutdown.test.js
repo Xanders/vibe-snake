@@ -6,8 +6,10 @@ const test = require('node:test');
 const {
     ShutdownCoordinator,
     ShutdownInProgressError,
+    abortAndClear,
     failClosedOnUnexpectedRejection,
     settleAllOrThrow,
+    terminateRejectedTransport,
 } = require('../dist/shutdown.js');
 const { TelegramPoller } = require('../dist/telegram-poller.js');
 const { dispatchJsonMessage } = require('../dist/json-message.js');
@@ -197,7 +199,9 @@ test('server wires score, joins, payments and repeated signals through the lifec
     assert.match(source, /await dispatchJsonMessage\(\s*messageStr,[\s\S]*?async data =>/);
     assert.match(source, /beginShutdown\('TELEGRAM_POLLER_FAILURE',\s*1\)/);
     assert.match(source, /await settleAllOrThrow\(playerWrites,/);
-    assert.match(source, /if\s*\(lifecycle\.isShuttingDown\)\s*{\s*ws\.close\(1012/);
+    assert.match(source, /if\s*\(lifecycle\.isShuttingDown\)\s*{\s*terminateRejectedTransport\(ws\)/);
+    assert.match(source, /invoiceControllers\.add\(controller\)[\s\S]*?createInvoiceLink\([\s\S]*?controller\.signal/);
+    assert.match(source, /abortAndClear\(invoiceControllers\)/);
     assert.match(source, /process\.on\('SIGTERM',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGTERM'\)\)/);
     assert.match(source, /process\.on\('SIGINT',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGINT'\)\)/);
 });
@@ -290,6 +294,33 @@ test('critical poller completion during an existing shutdown does not start anot
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(callbackCount, 0);
+});
+
+test('stopping producers aborts and releases a stalled invoice request', async () => {
+    const controllers = new Set();
+    const controller = new AbortController();
+    controllers.add(controller);
+    const invoice = new Promise((resolve, reject) => {
+        controller.signal.addEventListener('abort', () => reject(new Error('invoice aborted')), { once: true });
+    });
+
+    abortAndClear(controllers);
+
+    await assert.rejects(invoice, /invoice aborted/);
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(controllers.size, 0);
+});
+
+test('a WebSocket admitted after shutdown starts is terminated immediately', () => {
+    let state = 'OPEN';
+    const lateSocket = {
+        close: () => { state = 'CLOSING'; },
+        terminate: () => { state = 'TERMINATED'; },
+    };
+
+    terminateRejectedTransport(lateSocket);
+
+    assert.equal(state, 'TERMINATED');
 });
 
 test('Telegram shutdown waits for a successful payment write before confirming its update', async () => {

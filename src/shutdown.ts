@@ -33,6 +33,15 @@ export function failClosedOnUnexpectedRejection(
     });
 }
 
+export function abortAndClear(controllers: Set<AbortController>): void {
+    for (const controller of controllers) controller.abort();
+    controllers.clear();
+}
+
+export function terminateRejectedTransport(transport: { terminate(): void }): void {
+    transport.terminate();
+}
+
 export class ShutdownCoordinator {
     private acceptingWork = true;
     private readonly pending = new Set<Promise<unknown>>();

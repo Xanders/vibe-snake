@@ -18,10 +18,12 @@ import {
     closeDB,
 } from './db';
 import {
+    abortAndClear,
     failClosedOnUnexpectedRejection,
     settleAllOrThrow,
     ShutdownCoordinator,
     ShutdownInProgressError,
+    terminateRejectedTransport,
 } from './shutdown';
 import { TelegramPoller } from './telegram-poller';
 import { dispatchJsonMessage } from './json-message';
@@ -51,6 +53,7 @@ const clients: Set<WebSocket> = new Set();
 let gameLoop: NodeJS.Timeout | null = null;
 let botStartPromise: Promise<void> | null = null;
 const delayedBroadcasts = new Set<NodeJS.Timeout>();
+const invoiceControllers = new Set<AbortController>();
 
 const lifecycle = new ShutdownCoordinator({
     stopProducers,
@@ -500,7 +503,7 @@ function updateLeaderboard(name: string, score: number): void {
 
 server.on('connection', (ws: WebSocket) => {
     if (lifecycle.isShuttingDown) {
-        ws.close(1012, 'Server shutting down');
+        terminateRejectedTransport(ws);
         return;
     }
     clients.add(ws);
@@ -657,6 +660,8 @@ server.on('connection', (ws: WebSocket) => {
             }
             if (data.type === 'get-invoice') {
                 if (bot) {
+                    const controller = new AbortController();
+                    invoiceControllers.add(controller);
                     try {
                         const link = await bot.api.createInvoiceLink(
                             '10 Games',
@@ -664,11 +669,17 @@ server.on('connection', (ws: WebSocket) => {
                             INVOICE_PAYLOAD,
                             '',
                             'XTR',
-                            [{ label: '10 games', amount: GAME_PRICE }]
+                            [{ label: '10 games', amount: GAME_PRICE }],
+                            undefined,
+                            controller.signal,
                         );
                         ws.send(JSON.stringify({ type: 'invoice-link', link }));
                     } catch (err) {
-                        ws.send(JSON.stringify({ type: 'error', message: 'failed to create invoice' }));
+                        if (!controller.signal.aborted) {
+                            ws.send(JSON.stringify({ type: 'error', message: 'failed to create invoice' }));
+                        }
+                    } finally {
+                        invoiceControllers.delete(controller);
                     }
                 }
                 return;
@@ -803,6 +814,7 @@ function stopProducers(): void {
     }
     for (const timer of delayedBroadcasts) clearTimeout(timer);
     delayedBroadcasts.clear();
+    abortAndClear(invoiceControllers);
 }
 
 async function stopBotPolling(): Promise<void> {

@@ -9,7 +9,7 @@ declare module 'grammy' {
   }
 
   export interface Api {
-    createInvoiceLink(title: string, description: string, payload: string, providerData: string, currency: string, prices: { label: string; amount: number }[]): Promise<string>;
+    createInvoiceLink(title: string, description: string, payload: string, providerData: string, currency: string, prices: { label: string; amount: number }[], other?: Record<string, unknown>, signal?: AbortSignal): Promise<string>;
     deleteWebhook(options: { drop_pending_updates?: boolean }, signal?: AbortSignal): Promise<unknown>;
     getUpdates(options: { offset?: number; limit?: number; timeout?: number; allowed_updates?: string[] }, signal?: AbortSignal): Promise<Update[]>;
   }
