@@ -42,6 +42,13 @@ export function terminateRejectedTransport(transport: { terminate(): void }): vo
     transport.terminate();
 }
 
+export function destroyAndClearTransports(
+    transports: Set<{ destroy(): void }>,
+): void {
+    for (const transport of transports) transport.destroy();
+    transports.clear();
+}
+
 export class ShutdownCoordinator {
     private acceptingWork = true;
     private readonly pending = new Set<Promise<unknown>>();

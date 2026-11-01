@@ -1,4 +1,6 @@
 import * as WebSocket from 'ws';
+import * as http from 'http';
+import * as net from 'net';
 import { Bot } from 'grammy';
 import type { Context as TelegramContext } from 'grammy';
 import {
@@ -19,6 +21,7 @@ import {
 } from './db';
 import {
     abortAndClear,
+    destroyAndClearTransports,
     failClosedOnUnexpectedRejection,
     settleAllOrThrow,
     ShutdownCoordinator,
@@ -48,8 +51,10 @@ let botPoller: TelegramPoller<any> | null = null;
 if (BOT_TOKEN) {
     bot = new Bot(BOT_TOKEN);
 }
-const server = new WebSocket.Server({ port: PORT });
+const httpServer = http.createServer();
+const server = new WebSocket.Server({ server: httpServer });
 const clients: Set<WebSocket> = new Set();
+const rawSockets = new Set<net.Socket>();
 let gameLoop: NodeJS.Timeout | null = null;
 let botStartPromise: Promise<void> | null = null;
 const delayedBroadcasts = new Set<NodeJS.Timeout>();
@@ -61,6 +66,16 @@ const lifecycle = new ShutdownCoordinator({
     closeWebSockets,
     closeDatabase: closeDatabaseConnection,
 });
+
+httpServer.on('connection', socket => {
+    if (lifecycle.isShuttingDown) {
+        socket.destroy();
+        return;
+    }
+    rawSockets.add(socket);
+    socket.once('close', () => rawSockets.delete(socket));
+});
+httpServer.listen(PORT);
 
 // Track token associated with each websocket even if the user is currently not in the multiplayer room.
 const socketTokens = new Map<WebSocket, string>();
@@ -825,6 +840,7 @@ async function stopBotPolling(): Promise<void> {
 function closeWebSockets(): Promise<void> {
     return new Promise((resolve, reject) => {
         let settled = false;
+        let httpClosed = false;
         let listenerClosed = false;
         let terminateTimer: NodeJS.Timeout;
         let deadlineTimer: NodeJS.Timeout;
@@ -837,12 +853,13 @@ function closeWebSockets(): Promise<void> {
             else resolve();
         };
         const finishIfDrained = () => {
-            if (listenerClosed && clients.size === 0) finish();
+            if (httpClosed && listenerClosed && clients.size === 0 && rawSockets.size === 0) finish();
         };
         terminateTimer = setTimeout(() => {
             for (const client of clients) {
                 if (client.readyState !== WebSocket.CLOSED) client.terminate();
             }
+            destroyAndClearTransports(rawSockets);
         }, 2000);
         deadlineTimer = setTimeout(
             () => finish(new Error('WebSocket server did not close within 5 seconds')),
@@ -850,6 +867,13 @@ function closeWebSockets(): Promise<void> {
         );
 
         try {
+            httpServer.close(error => {
+                if (error) finish(error);
+                else {
+                    httpClosed = true;
+                    finishIfDrained();
+                }
+            });
             server.close(error => {
                 if (error) finish(error);
                 else {
@@ -863,6 +887,7 @@ function closeWebSockets(): Promise<void> {
                     client.close(1001, 'Server shutting down');
                 }
             }
+            for (const socket of rawSockets) socket.once('close', finishIfDrained);
             finishIfDrained();
         } catch (error) {
             finish(error instanceof Error ? error : new Error(String(error)));

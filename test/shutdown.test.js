@@ -7,6 +7,7 @@ const {
     ShutdownCoordinator,
     ShutdownInProgressError,
     abortAndClear,
+    destroyAndClearTransports,
     failClosedOnUnexpectedRejection,
     settleAllOrThrow,
     terminateRejectedTransport,
@@ -202,6 +203,9 @@ test('server wires score, joins, payments and repeated signals through the lifec
     assert.match(source, /if\s*\(lifecycle\.isShuttingDown\)\s*{\s*terminateRejectedTransport\(ws\)/);
     assert.match(source, /invoiceControllers\.add\(controller\)[\s\S]*?createInvoiceLink\([\s\S]*?controller\.signal/);
     assert.match(source, /abortAndClear\(invoiceControllers\)/);
+    assert.match(source, /new WebSocket\.Server\(\{ server: httpServer \}\)/);
+    assert.match(source, /httpServer\.on\('connection',[\s\S]*?rawSockets\.add\(socket\)/);
+    assert.match(source, /destroyAndClearTransports\(rawSockets\)/);
     assert.match(source, /process\.on\('SIGTERM',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGTERM'\)\)/);
     assert.match(source, /process\.on\('SIGINT',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGINT'\)\)/);
 });
@@ -321,6 +325,21 @@ test('a WebSocket admitted after shutdown starts is terminated immediately', () 
     terminateRejectedTransport(lateSocket);
 
     assert.equal(state, 'TERMINATED');
+});
+
+test('the transport deadline destroys a partial pre-upgrade HTTP socket', () => {
+    const rawSockets = new Set();
+    const partialHandshake = {
+        requestBytes: 'GET / HTTP/1.1\r\nHost: example',
+        destroyed: false,
+        destroy() { this.destroyed = true; },
+    };
+    rawSockets.add(partialHandshake);
+
+    destroyAndClearTransports(rawSockets);
+
+    assert.equal(partialHandshake.destroyed, true);
+    assert.equal(rawSockets.size, 0);
 });
 
 test('Telegram shutdown waits for a successful payment write before confirming its update', async () => {
