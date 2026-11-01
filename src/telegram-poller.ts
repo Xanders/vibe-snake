@@ -29,7 +29,10 @@ export class TelegramPoller<TUpdate extends TelegramUpdate> {
     private lastCompletedUpdateId = 0;
     private terminalError: unknown = null;
 
-    constructor(private readonly bot: TelegramPollingBot<TUpdate>) {}
+    constructor(
+        private readonly bot: TelegramPollingBot<TUpdate>,
+        private readonly confirmationTimeoutMs = 5000,
+    ) {}
 
     start(): Promise<void> {
         if (this.startPromise) return this.startPromise;
@@ -53,11 +56,20 @@ export class TelegramPoller<TUpdate extends TelegramUpdate> {
         await this.startPromise;
 
         if (this.terminalError || !this.initialized) return;
-        await this.bot.api.getUpdates({
-            offset: this.lastCompletedUpdateId + 1,
-            limit: 1,
-            timeout: 0,
-        });
+        const confirmationController = new AbortController();
+        const confirmationTimer = setTimeout(
+            () => confirmationController.abort(),
+            this.confirmationTimeoutMs,
+        );
+        try {
+            await this.bot.api.getUpdates({
+                offset: this.lastCompletedUpdateId + 1,
+                limit: 1,
+                timeout: 0,
+            }, confirmationController.signal);
+        } finally {
+            clearTimeout(confirmationTimer);
+        }
     }
 
     private async run(signal: AbortSignal): Promise<void> {

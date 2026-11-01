@@ -6,6 +6,8 @@ const test = require('node:test');
 const {
     ShutdownCoordinator,
     ShutdownInProgressError,
+    failClosedOnUnexpectedRejection,
+    settleAllOrThrow,
 } = require('../dist/shutdown.js');
 const { TelegramPoller } = require('../dist/telegram-poller.js');
 const { dispatchJsonMessage } = require('../dist/json-message.js');
@@ -192,7 +194,9 @@ test('server wires score, joins, payments and repeated signals through the lifec
     );
     assert.doesNotMatch(paymentHandler, /catch\s*\(/);
     assert.match(source, /botPoller\s*=\s*new TelegramPoller\(bot\)/);
-    assert.match(source, /await dispatchJsonMessage\(messageStr,\s*async data =>/);
+    assert.match(source, /await dispatchJsonMessage\(\s*messageStr,[\s\S]*?async data =>/);
+    assert.match(source, /beginShutdown\('TELEGRAM_POLLER_FAILURE',\s*1\)/);
+    assert.match(source, /await settleAllOrThrow\(playerWrites,/);
     assert.match(source, /if\s*\(lifecycle\.isShuttingDown\)\s*{\s*ws\.close\(1012/);
     assert.match(source, /process\.on\('SIGTERM',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGTERM'\)\)/);
     assert.match(source, /process\.on\('SIGINT',\s*\(\)\s*=>\s*handleShutdownSignal\('SIGINT'\)\)/);
@@ -203,15 +207,89 @@ test('a structured join write rejection propagates instead of becoming chat', as
     const writeError = new Error('create user failed');
 
     await assert.rejects(
-        dispatchJsonMessage('{"type":"join-multiplayer","name":"Ada"}', async data => {
+        dispatchJsonMessage(
+            '{"type":"join-multiplayer","name":"Ada"}',
+            data => data.type === 'join-multiplayer',
+            async data => {
             assert.equal(data.type, 'join-multiplayer');
             throw writeError;
-        }).then(isJson => {
+            },
+        ).then(isJson => {
             if (!isJson) chatFallback = true;
         }),
         writeError,
     );
     assert.equal(chatFallback, false);
+});
+
+test('unmatched numeric JSON still falls through to numeric chat and cheat handling', async () => {
+    for (const message of ['123', '10112026', '62021110']) {
+        let commandRan = false;
+        const handled = await dispatchJsonMessage(
+            message,
+            data => data !== null && typeof data === 'object' && data.type === 'join-multiplayer',
+            async () => { commandRan = true; },
+        );
+        assert.equal(handled, false);
+        assert.equal(commandRan, false);
+    }
+});
+
+test('score failure waits for every accepted player continuation before rejecting', async () => {
+    const secondCredit = deferred();
+    const events = [];
+    const first = Promise.reject(new Error('credit-a failed'));
+    const second = (async () => {
+        events.push('credit-b-started');
+        await secondCredit.promise;
+        events.push('cooldown-b-finished');
+    })();
+
+    const settled = settleAllOrThrow([first, second], 'score writes failed');
+    await Promise.resolve();
+    let rejected = false;
+    void settled.catch(() => { rejected = true; });
+    await Promise.resolve();
+    assert.equal(rejected, false);
+
+    secondCredit.resolve();
+    await assert.rejects(settled, error => {
+        assert.equal(error instanceof AggregateError, true);
+        assert.equal(error.errors.length, 1);
+        return true;
+    });
+    assert.deepEqual(events, ['credit-b-started', 'cooldown-b-finished']);
+});
+
+test('an unexpected critical poller failure triggers fail-closed shutdown', async () => {
+    const task = deferred();
+    const failures = [];
+    failClosedOnUnexpectedRejection(
+        task.promise,
+        () => false,
+        error => failures.push(error),
+    );
+
+    const failure = new Error('payment poller stopped');
+    task.reject(failure);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual(failures, [failure]);
+});
+
+test('critical poller completion during an existing shutdown does not start another shutdown', async () => {
+    const task = deferred();
+    let callbackCount = 0;
+    failClosedOnUnexpectedRejection(
+        task.promise,
+        () => true,
+        () => { callbackCount++; },
+    );
+
+    task.reject(new Error('expected stop failure'));
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(callbackCount, 0);
 });
 
 test('Telegram shutdown waits for a successful payment write before confirming its update', async () => {
@@ -230,9 +308,10 @@ test('Telegram shutdown waits for a successful payment write before confirming i
         api: {
             deleteWebhook: async () => calls.push('delete-webhook'),
             getUpdates: async (options, signal) => {
-                calls.push(`get-${options.offset}-${signal ? 'poll' : 'confirm'}`);
-                if (signal && pollCount++ === 0) return [{ update_id: 41 }];
-                if (signal) return new Promise((resolve, reject) => {
+                const kind = signal && options.timeout === 0 ? 'confirm' : 'poll';
+                calls.push(`get-${options.offset}-${kind}`);
+                if (kind === 'poll' && pollCount++ === 0) return [{ update_id: 41 }];
+                if (kind === 'poll') return new Promise((resolve, reject) => {
                     signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
                 });
                 return [];
@@ -253,6 +332,34 @@ test('Telegram shutdown waits for a successful payment write before confirming i
     assert.ok(calls.indexOf('written-41') < calls.indexOf('get-42-confirm'));
 });
 
+test('a stalled final Telegram confirmation is aborted promptly', async () => {
+    let confirmationAborted = false;
+    let pollCount = 0;
+    const bot = {
+        init: async () => {},
+        handleUpdate: async () => {},
+        api: {
+            deleteWebhook: async () => {},
+            getUpdates: async (options, signal) => {
+                if (options.timeout !== 0 && pollCount++ === 0) return [{ update_id: 61 }];
+                return new Promise((resolve, reject) => {
+                    signal.addEventListener('abort', () => {
+                        if (options.timeout === 0) confirmationAborted = true;
+                        reject(new Error('aborted request'));
+                    }, { once: true });
+                });
+            },
+        },
+    };
+
+    const poller = new TelegramPoller(bot, 5);
+    const running = poller.start();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await assert.rejects(poller.stop(), /aborted request/);
+    await running;
+    assert.equal(confirmationAborted, true);
+});
+
 test('Telegram does not confirm a payment update whose write failed', async () => {
     const bot = {
         init: async () => {},
@@ -260,7 +367,7 @@ test('Telegram does not confirm a payment update whose write failed', async () =
         api: {
             deleteWebhook: async () => {},
             getUpdates: async (options, signal) => {
-                if (signal) return [{ update_id: 51 }];
+                if (options.timeout !== 0) return [{ update_id: 51 }];
                 throw new Error(`unexpected confirmation at ${options.offset}`);
             },
         },

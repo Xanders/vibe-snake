@@ -12,6 +12,27 @@ export interface ShutdownPlan {
     closeDatabase(): void | Promise<void>;
 }
 
+export async function settleAllOrThrow(
+    promises: Promise<unknown>[],
+    message: string,
+): Promise<void> {
+    const results = await Promise.allSettled(promises);
+    const errors = results
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map(result => result.reason);
+    if (errors.length > 0) throw new AggregateError(errors, message);
+}
+
+export function failClosedOnUnexpectedRejection(
+    task: Promise<unknown>,
+    isShuttingDown: () => boolean,
+    onFailure: (error: unknown) => void,
+): void {
+    void task.catch(error => {
+        if (!isShuttingDown()) onFailure(error);
+    });
+}
+
 export class ShutdownCoordinator {
     private acceptingWork = true;
     private readonly pending = new Set<Promise<unknown>>();
@@ -41,7 +62,7 @@ export class ShutdownCoordinator {
         return promise;
     }
 
-    shutdown(signal: NodeJS.Signals): Promise<void> {
+    shutdown(signal: string): Promise<void> {
         if (this.shutdownPromise) return this.shutdownPromise;
 
         this.acceptingWork = false;
@@ -49,7 +70,7 @@ export class ShutdownCoordinator {
         return this.shutdownPromise;
     }
 
-    private async run(signal: NodeJS.Signals): Promise<void> {
+    private async run(signal: string): Promise<void> {
         const errors: Error[] = [];
         const attempt = async (label: string, action: () => void | Promise<void>) => {
             try {

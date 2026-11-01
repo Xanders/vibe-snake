@@ -1,5 +1,6 @@
 export async function dispatchJsonMessage(
     message: string,
+    isKnownCommand: (data: any) => boolean,
     handler: (data: any) => void | Promise<void>,
 ): Promise<boolean> {
     let data: any;
@@ -9,6 +10,7 @@ export async function dispatchJsonMessage(
         return false;
     }
 
+    if (!isKnownCommand(data)) return false;
     await handler(data);
     return true;
 }

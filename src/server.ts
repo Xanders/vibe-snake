@@ -17,7 +17,12 @@ import {
     MultiplayerEntry,
     closeDB,
 } from './db';
-import { ShutdownCoordinator, ShutdownInProgressError } from './shutdown';
+import {
+    failClosedOnUnexpectedRejection,
+    settleAllOrThrow,
+    ShutdownCoordinator,
+    ShutdownInProgressError,
+} from './shutdown';
 import { TelegramPoller } from './telegram-poller';
 import { dispatchJsonMessage } from './json-message';
 import { v4 as uuidv4 } from 'uuid';
@@ -452,7 +457,7 @@ async function recordMultiplayerScore(): Promise<void> {
 
     const active: MultiplayerPlayer[] = [];
 
-    await Promise.all(players.map(async p => {
+    const playerWrites = players.map(async p => {
         if (p.gameCredits > 0) {
             p.gameCredits--;
             await setUserGameCredits(p.token, p.gameCredits);
@@ -469,7 +474,8 @@ async function recordMultiplayerScore(): Promise<void> {
         }
 
         sendGameInfo(p);
-    }));
+    });
+    await settleAllOrThrow(playerWrites, 'One or more multiplayer score writes failed');
 
     if (active.length > 0) {
         const names = active.map(p => p.name).join(', ');
@@ -506,7 +512,16 @@ server.on('connection', (ws: WebSocket) => {
     ws.on('message', (message: WebSocket.RawData) => {
         void lifecycle.track('websocket-message', async () => {
         const messageStr = message.toString();
-        const handledAsJson = await dispatchJsonMessage(messageStr, async data => {
+        const handledAsJson = await dispatchJsonMessage(
+        messageStr,
+        data => data !== null && typeof data === 'object' && [
+            'submit-score',
+            'join-multiplayer',
+            'move',
+            'get-invoice',
+            'leave-multiplayer',
+        ].includes(data.type),
+        async data => {
         if (data !== undefined && data !== null) {
             if (data.type === 'submit-score' && typeof data.name === 'string' && typeof data.score === 'number') {
                 updateLeaderboard(data.name, data.score);
@@ -763,9 +778,14 @@ if (bot) {
 
     botPoller = new TelegramPoller(bot);
     botStartPromise = botPoller.start();
-    void botStartPromise.catch(error => {
-        if (!lifecycle.isShuttingDown) console.error('Telegram bot failed', error);
-    });
+    failClosedOnUnexpectedRejection(
+        botStartPromise,
+        () => lifecycle.isShuttingDown,
+        error => {
+            console.error('Telegram bot failed', error);
+            beginShutdown('TELEGRAM_POLLER_FAILURE', 1);
+        },
+    );
     console.log('Telegram bot started');
 } else {
     console.log('BOT_TOKEN not set, Telegram payments disabled');
@@ -844,20 +864,24 @@ async function closeDatabaseConnection(): Promise<void> {
 }
 
 let shutdownResultObserved = false;
-function handleShutdownSignal(signal: NodeJS.Signals): void {
-    const shutdown = lifecycle.shutdown(signal);
+function beginShutdown(reason: string, successExitCode: number): void {
+    const shutdown = lifecycle.shutdown(reason);
     if (shutdownResultObserved) return;
     shutdownResultObserved = true;
     void shutdown.then(
         () => {
-            console.log(`Graceful shutdown complete after ${signal}`);
-            process.exitCode = 0;
+            console.log(`Graceful shutdown complete after ${reason}`);
+            process.exitCode = successExitCode;
         },
         error => {
             console.error('Graceful shutdown completed with errors', error);
             process.exitCode = 1;
         },
     );
+}
+
+function handleShutdownSignal(signal: NodeJS.Signals): void {
+    beginShutdown(signal, 0);
 }
 
 process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'));
