@@ -15,7 +15,9 @@ import {
     addMultiplayerScore,
     getMultiplayerLeaderboard,
     MultiplayerEntry,
+    closeDB,
 } from './db';
+import { ShutdownCoordinator, ShutdownInProgressError } from './shutdown';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 
@@ -38,6 +40,16 @@ if (BOT_TOKEN) {
 }
 const server = new WebSocket.Server({ port: PORT });
 const clients: Set<WebSocket> = new Set();
+let gameLoop: NodeJS.Timeout | null = null;
+let botStartPromise: Promise<void> | null = null;
+const delayedBroadcasts = new Set<NodeJS.Timeout>();
+
+const lifecycle = new ShutdownCoordinator({
+    stopProducers,
+    stopBot: stopBotPolling,
+    closeWebSockets,
+    closeDatabase: closeDatabaseConnection,
+});
 
 // Track token associated with each websocket even if the user is currently not in the multiplayer room.
 const socketTokens = new Map<WebSocket, string>();
@@ -122,7 +134,7 @@ function verifyTelegramInitData(initData: string): TelegramAuthResult | null {
     }
 }
 
-initDB()
+const databaseReady = initDB()
     .then(async () => {
         console.log('Database ready');
         const rows = await getMultiplayerLeaderboard(20);
@@ -308,13 +320,13 @@ function gameStep(): void {
 
     // Wall collision
     if (snake.x < 0 || snake.x >= 400 || snake.y < 0 || snake.y >= 400) {
-        recordMultiplayerScore();
+        void lifecycle.track('multiplayer-score', recordMultiplayerScore).catch(reportTrackedError);
         resetSnake();
     }
 
     // Self collision
     if (snake.tail.some(seg => seg.x === snake.x && seg.y === snake.y)) {
-        recordMultiplayerScore();
+        void lifecycle.track('multiplayer-score', recordMultiplayerScore).catch(reportTrackedError);
         resetSnake();
     }
 
@@ -331,7 +343,7 @@ function gameStep(): void {
     broadcastMultiplayerState();
 }
 
-setInterval(gameStep, 150);
+gameLoop = setInterval(gameStep, 150);
 
 // Simple AI responses for different message patterns
 const aiResponses: AIResponses = {
@@ -377,6 +389,14 @@ function broadcast(message: string): void {
             client.send(message);
         }
     });
+}
+
+function scheduleBroadcast(message: string): void {
+    const timer = setTimeout(() => {
+        delayedBroadcasts.delete(timer);
+        if (!lifecycle.isShuttingDown) broadcast(message);
+    }, 1000);
+    delayedBroadcasts.add(timer);
 }
 
 function sendLeaderboard(ws?: WebSocket): void {
@@ -470,13 +490,18 @@ function updateLeaderboard(name: string, score: number): void {
 }
 
 server.on('connection', (ws: WebSocket) => {
+    if (lifecycle.isShuttingDown) {
+        ws.close(1012, 'Server shutting down');
+        return;
+    }
     clients.add(ws);
     console.log('New client connected');
     ws.send('🤖 AI: Welcome to Snake Game! Feel free to ask for help or tips!');
     sendLeaderboard(ws);
     sendMpLeaderboard(ws);
 
-    ws.on('message', async (message: WebSocket.RawData) => {
+    ws.on('message', (message: WebSocket.RawData) => {
+        void lifecycle.track('websocket-message', async () => {
         const messageStr = message.toString();
         try {
             const data = JSON.parse(messageStr);
@@ -486,7 +511,6 @@ server.on('connection', (ws: WebSocket) => {
                 return;
             }
             if (data.type === 'join-multiplayer') {
-                (async () => {
                     console.log('Join request', {
                         hasToken: typeof data.token === 'string',
                         hasTg: typeof data.tgInitData === 'string',
@@ -592,7 +616,6 @@ server.on('connection', (ws: WebSocket) => {
                     ws.send(JSON.stringify({ type: 'init-multiplayer', id, emoji, name, token, credits: gameCredits }));
                     sendGameInfo(player);
                     broadcastMultiplayerState();
-                })();
                 return;
             }
             if (data.type === 'move' && multiplayerPlayers.has(ws) && typeof data.dir === 'string') {
@@ -693,8 +716,9 @@ server.on('connection', (ws: WebSocket) => {
 
         const aiResponse = getAIResponse(messageStr);
         if (aiResponse) {
-            setTimeout(() => broadcast(aiResponse), 1000);
+            scheduleBroadcast(aiResponse);
         }
+        }).catch(reportTrackedError);
     });
 
     ws.on('close', () => {
@@ -716,24 +740,126 @@ console.log(`WebSocket server is running on port ${PORT}`);
 if (bot) {
 
     bot.on('message:successful_payment', async (ctx: TelegramContext) => {
-        const payment = ctx.message.successful_payment;
-        if (payment.invoice_payload === INVOICE_PAYLOAD) {
-            const tgId = String(ctx.from!.id);
-            const user = await getUserByTelegramId(tgId);
-            if (user) {
-                const credits = user.game_credits + 10;
-                await setUserGameCredits(user.token, credits);
-                const player = Array.from(multiplayerPlayers.values()).find(p => p.token === user.token);
-                if (player) {
-                    player.gameCredits = credits;
-                    sendGameInfo(player);
+        try {
+            await lifecycle.track('telegram-payment', async () => {
+                const payment = ctx.message.successful_payment;
+                if (payment.invoice_payload === INVOICE_PAYLOAD) {
+                    const tgId = String(ctx.from!.id);
+                    const user = await getUserByTelegramId(tgId);
+                    if (user) {
+                        const credits = user.game_credits + 10;
+                        await setUserGameCredits(user.token, credits);
+                        const player = Array.from(multiplayerPlayers.values()).find(p => p.token === user.token);
+                        if (player) {
+                            player.gameCredits = credits;
+                            sendGameInfo(player);
+                        }
+                    }
                 }
-            }
+            });
+        } catch (error) {
+            reportTrackedError(error);
         }
     });
 
-    bot.start();
+    botStartPromise = bot.start();
+    void botStartPromise.catch(error => {
+        if (!lifecycle.isShuttingDown) console.error('Telegram bot failed', error);
+    });
     console.log('Telegram bot started');
 } else {
     console.log('BOT_TOKEN not set, Telegram payments disabled');
 }
+
+function reportTrackedError(error: unknown): void {
+    if (error instanceof ShutdownInProgressError) return;
+    console.error('Tracked operation failed', error);
+}
+
+function stopProducers(): void {
+    if (gameLoop) {
+        clearInterval(gameLoop);
+        gameLoop = null;
+    }
+    for (const timer of delayedBroadcasts) clearTimeout(timer);
+    delayedBroadcasts.clear();
+}
+
+async function stopBotPolling(): Promise<void> {
+    if (!bot) return;
+    if (bot.isRunning()) await bot.stop();
+    if (botStartPromise) await botStartPromise;
+}
+
+function closeWebSockets(): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let listenerClosed = false;
+        let terminateTimer: NodeJS.Timeout;
+        let deadlineTimer: NodeJS.Timeout;
+        const finish = (error?: Error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(terminateTimer);
+            clearTimeout(deadlineTimer);
+            if (error) reject(error);
+            else resolve();
+        };
+        const finishIfDrained = () => {
+            if (listenerClosed && clients.size === 0) finish();
+        };
+        terminateTimer = setTimeout(() => {
+            for (const client of clients) {
+                if (client.readyState !== WebSocket.CLOSED) client.terminate();
+            }
+        }, 2000);
+        deadlineTimer = setTimeout(
+            () => finish(new Error('WebSocket server did not close within 5 seconds')),
+            5000,
+        );
+
+        try {
+            server.close(error => {
+                if (error) finish(error);
+                else {
+                    listenerClosed = true;
+                    finishIfDrained();
+                }
+            });
+            for (const client of clients) {
+                client.once('close', finishIfDrained);
+                if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+                    client.close(1001, 'Server shutting down');
+                }
+            }
+            finishIfDrained();
+        } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)));
+        }
+    });
+}
+
+async function closeDatabaseConnection(): Promise<void> {
+    await databaseReady;
+    await closeDB();
+}
+
+let shutdownResultObserved = false;
+function handleShutdownSignal(signal: NodeJS.Signals): void {
+    const shutdown = lifecycle.shutdown(signal);
+    if (shutdownResultObserved) return;
+    shutdownResultObserved = true;
+    void shutdown.then(
+        () => {
+            console.log(`Graceful shutdown complete after ${signal}`);
+            process.exitCode = 0;
+        },
+        error => {
+            console.error('Graceful shutdown completed with errors', error);
+            process.exitCode = 1;
+        },
+    );
+}
+
+process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'));
+process.on('SIGINT', () => handleShutdownSignal('SIGINT'));

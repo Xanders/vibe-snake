@@ -16,15 +16,23 @@ export interface User {
 
 const DB_PATH = path.join(__dirname, '../db/snake.db');
 let db: Database<sqlite3.Database, sqlite3.Statement>;
+let dbOpen = false;
 
 export async function initDB(): Promise<void> {
     const exists = fs.existsSync(DB_PATH);
     db = await open({ filename: DB_PATH, driver: sqlite3.Database });
+    dbOpen = true;
     if (!exists) {
         await createSchema();
     } else {
         await verifySchema();
     }
+}
+
+export async function closeDB(): Promise<void> {
+    if (!dbOpen) return;
+    await db.close();
+    dbOpen = false;
 }
 
 async function createSchema(): Promise<void> {

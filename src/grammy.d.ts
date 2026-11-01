@@ -20,7 +20,9 @@ declare module 'grammy' {
   export class Bot<TContext = Context> {
     constructor(token: string);
     on(event: string, handler: (ctx: TContext) => Promise<void> | void): void;
-    start(): void;
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    isRunning(): boolean;
     api: Api;
   }
 }
